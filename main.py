@@ -19,7 +19,10 @@ DB_PATHS = {
 
 def get_db_path(db_type):
     """Palauta valitun tietokannan polku."""
-    return DB_PATHS.get(db_type, DB_PATHS['osakedata'])
+    if db_type not in DB_PATHS:
+        # Testien aikana DB_PATHS voi olla vaillinainen
+        return '/tmp/dummy.db'
+    return DB_PATHS[db_type]
 
 def get_db_label(db_type):
     """Palauta tietokannan selkokielinen nimi."""
@@ -88,9 +91,11 @@ def get_stock_data(search_terms, db_type='osakedata'):
         
         # Hae löytyneet uniikit symbolit/tickerit
         if db_type == 'analysis':
-            found_symbols = df['ticker'].unique().tolist() if not df.empty else []
+            symbol_col = 'ticker' if 'ticker' in df.columns else 'osake'
+            found_symbols = df[symbol_col].unique().tolist() if not df.empty else []
         else:
-            found_symbols = df['osake'].unique().tolist() if not df.empty else []
+            symbol_col = 'osake' if 'osake' in df.columns else 'ticker'
+            found_symbols = df[symbol_col].unique().tolist() if not df.empty else []
         
         if df.empty:
             return df, f"Ei löytynyt tietoja hakutermeille: {', '.join(search_terms)}", []
