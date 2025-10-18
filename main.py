@@ -298,6 +298,9 @@ def fetch_yfinance_data(tickers):
                 )
             """)
             
+            # Varmista UNIQUE-indeksi duplikaattien estämiseksi
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake, pvm)")
+            
             for ticker in clean_tickers:
                 try:
                     # Hae data YFinancesta
@@ -368,6 +371,155 @@ def fetch_yfinance_data(tickers):
                     
     except Exception as e:
         return False, f"Tietokantavirhe: {str(e)}", 0
+
+
+def fetch_csv_data(tickers):
+    """Lataa osaketiedot CSV-tiedostosta /home/kalle/projects/rawcandle/data/osakedata.csv"""
+    import csv
+    from datetime import datetime
+    
+    if not tickers:
+        return False, "Ei tickereitä annettu", 0
+    
+    # Siivoa ja validoi tickerit
+    clean_tickers = []
+    for ticker in tickers:
+        ticker = ticker.strip().upper()
+        if ticker and ticker.replace('.', '').replace('-', '').replace('^', '').isalnum():
+            clean_tickers.append(ticker)
+    
+    if not clean_tickers:
+        return False, "Ei kelvollisia tickereitä annettu", 0
+    
+    csv_file_path = "/home/kalle/projects/rawcandle/data/osakedata.csv"
+    
+    # Tarkista että CSV-tiedosto on olemassa
+    if not os.path.exists(csv_file_path):
+        return False, f"CSV-tiedostoa ei löytynyt: {csv_file_path}", 0
+    
+    saved_count = 0
+    failed_tickers = []
+    found_tickers = set()
+    
+    db_path = get_db_path('osakedata')
+    
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Varmista että taulu on olemassa
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    osake TEXT,
+                    pvm DATE,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER,
+                    UNIQUE(osake, pvm)
+                )
+            """)
+            
+            # Varmista UNIQUE-indeksi duplikaattien estämiseksi
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake, pvm)")
+            
+            # Lue CSV-tiedosto
+            with open(csv_file_path, 'r', encoding='utf-8') as csvfile:
+                # CSV ei sisällä otsikoita, joten määritellään sarakkeet manuaalisesti
+                # Oletettu rakenne: ticker,date,open,high,low,close,volume,date2,open2,...
+                # Käsitellään vain ensimmäiset 7 saraketta per ticker
+                
+                content = csvfile.read().strip()
+                # Jaa rivit ja käsittele data
+                lines = content.split('\n')
+                
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    
+                    # Jaa pilkuilla
+                    fields = line.split(',')
+                    
+                    if len(fields) < 7:  # Liian vähän kenttiä
+                        continue
+                    
+                    # Ensimmäinen kenttä on ticker
+                    ticker = fields[0].strip()
+                    
+                    # Tarkista että ticker on pyydettyjen joukossa
+                    if ticker not in clean_tickers:
+                        continue
+                    
+                    found_tickers.add(ticker)
+                    
+                    # Loput kentät ovat 6-kenttien ryhmiä: date, open, high, low, close, volume
+                    for i in range(1, len(fields), 6):
+                        if i + 5 >= len(fields):  # Ei tarpeeksi kenttiä tälle ryhmälle
+                            break
+                        
+                        try:
+                            date_str = fields[i].strip()
+                            open_price = float(fields[i + 1])
+                            high_price = float(fields[i + 2])
+                            low_price = float(fields[i + 3])
+                            close_price = float(fields[i + 4])
+                            volume = int(float(fields[i + 5]))  # Muunna float -> int
+                            
+                            # Muunna päivämäärä oikeaan muotoon
+                            try:
+                                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                                formatted_date = date_obj.strftime('%Y-%m-%d')
+                            except ValueError:
+                                continue  # Ohita virheelliset päivämäärät
+                            
+                            # Tarkista onko päivämäärä jo olemassa
+                            cursor.execute(
+                                "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
+                                (ticker, formatted_date)
+                            )
+                            
+                            if cursor.fetchone()[0] == 0:  # Ei ole olemassa
+                                cursor.execute("""
+                                    INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    ticker,
+                                    formatted_date,
+                                    open_price,
+                                    high_price,
+                                    low_price,
+                                    close_price,
+                                    volume
+                                ))
+                                saved_count += 1
+                                
+                        except (ValueError, IndexError) as e:
+                            continue  # Ohita virheelliset rivit
+            
+            conn.commit()
+            
+            # Tarkista mitkä tickerit löytyivät
+            not_found_tickers = [t for t in clean_tickers if t not in found_tickers]
+            if not_found_tickers:
+                failed_tickers.extend([f"{ticker} (ei löytynyt CSV:stä)" for ticker in not_found_tickers])
+            
+            # Muodosta vastausviesti
+            if saved_count > 0:
+                success_msg = f"Tallennettu {saved_count} riviä CSV:stä"
+                if failed_tickers:
+                    return True, f"{success_msg}. Epäonnistui: {', '.join(failed_tickers)}", saved_count
+                else:
+                    return True, success_msg, saved_count
+            else:
+                if failed_tickers:
+                    return False, f"Ei tallennettu yhtään riviä CSV:stä. Epäonnistui: {', '.join(failed_tickers)}", 0
+                else:
+                    return False, "Ei tallennettu yhtään riviä CSV:stä (kaikki jo olemassa)", 0
+                    
+    except Exception as e:
+        return False, f"Virhe CSV-lukemisessa: {str(e)}", 0
 
 
 @app.route('/')
@@ -510,6 +662,38 @@ def fetch_yfinance_route():
     
     # Hae data YFinancesta
     success, message, count = fetch_yfinance_data(tickers)
+    
+    if success:
+        return render_template('index.html', 
+                             success=message,
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+    else:
+        return render_template('index.html', 
+                             error=message,
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+
+
+@app.route('/fetch_csv', methods=['POST'])
+def fetch_csv_route():
+    """Hae OHLCV-data CSV-tiedostosta."""
+    ticker_input = request.form.get('tickers', '').strip()
+    
+    if not ticker_input:
+        return render_template('index.html', 
+                             error="Anna vähintään yksi ticker-symboli",
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+    
+    # Jaa tickerit pilkulla
+    tickers = [t.strip().upper() for t in ticker_input.split(',') if t.strip()]
+    
+    # Hae data CSV:stä
+    success, message, count = fetch_csv_data(tickers)
     
     if success:
         return render_template('index.html', 

@@ -42,7 +42,7 @@ class TestFlaskRoutes:
         assert ticker_input is not None
         
         # Check buttons
-        search_button = soup.find('button', string=lambda text: '🔍 Hae data' in text if text else False)
+        search_button = soup.find('button', string=lambda text: '🔍 Hae Data' in text if text else False)
         delete_button = soup.find('button', string=lambda text: '🗑️ Poista data' in text if text else False)
         assert search_button is not None
         assert delete_button is not None

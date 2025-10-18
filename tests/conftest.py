@@ -193,6 +193,34 @@ def corrupted_db(temp_test_dir):
     return db_path
 
 
+@pytest.fixture  
+def isolated_db(empty_osakedata_db, monkeypatch):
+    """Isolated database fixture for CSV and other tests."""
+    # Import main module and monkeypatch get_db_path function
+    import main
+    
+    def mock_get_db_path(db_type):
+        if db_type == 'osakedata':
+            return empty_osakedata_db
+        return empty_osakedata_db  # Default fallback
+    
+    monkeypatch.setattr(main, 'get_db_path', mock_get_db_path)
+    
+    # Also patch DB_PATHS if it exists
+    if hasattr(main, 'DB_PATHS'):
+        test_db_paths = {
+            'osakedata': empty_osakedata_db,
+            'analysis': empty_osakedata_db  # Use same for simplicity
+        }
+        monkeypatch.setattr(main, 'DB_PATHS', test_db_paths)
+    
+    # Configure Flask for testing
+    main.app.config['TESTING'] = True
+    main.app.config['WTF_CSRF_ENABLED'] = False
+    
+    return empty_osakedata_db
+
+
 @pytest.fixture
 def app_with_test_db(test_osakedata_db, test_analysis_db, monkeypatch):
     """Flask app configured to use test databases."""

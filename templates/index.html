@@ -118,22 +118,30 @@
                             </div>
                         </div>
                         
-                        <!-- Ensimmäinen rivi: Haku-painikkeet -->
+                        <!-- Ensimmäinen rivi: Haku- ja lataus-painikkeet -->
                         <div class="row mb-3">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <form method="POST" action="/search" class="d-inline">
                                     <input type="hidden" name="tickers" id="search_tickers">
                                     <input type="hidden" name="db_type" id="search_db_type">
                                     <button type="submit" class="btn btn-primary w-100" onclick="copyTickersToSearch()">
-                                        🔍 Hae data
+                                        🔍 Hae Data
                                     </button>
                                 </form>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <form method="POST" action="/fetch_yfinance" class="d-inline">
                                     <input type="hidden" name="tickers" id="yfinance_tickers">
                                     <button type="submit" class="btn btn-success w-100" onclick="copyTickersToYfinance()">
                                         📈 Hae YFinancesta
+                                    </button>
+                                </form>
+                            </div>
+                            <div class="col-md-4">
+                                <form method="POST" action="/fetch_csv" class="d-inline">
+                                    <input type="hidden" name="tickers" id="csv_tickers">
+                                    <button type="submit" class="btn btn-info w-100" onclick="copyTickersToCSV()">
+                                        📄 Hae CSVstä
                                     </button>
                                 </form>
                             </div>
@@ -324,6 +332,12 @@
         function copyTickersToYfinance() {
             const tickers = document.getElementById('tickers').value;
             document.getElementById('yfinance_tickers').value = tickers;
+        }
+
+        // Kopioi ticker-arvot CSV-lomakkeelle
+        function copyTickersToCSV() {
+            const tickers = document.getElementById('tickers').value;
+            document.getElementById('csv_tickers').value = tickers;
         }
 
                 // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan

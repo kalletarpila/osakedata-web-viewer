@@ -161,13 +161,28 @@ class TestFetchYfinanceData:
     
     @pytest.mark.unit
     @pytest.mark.yfinance
-    def test_fetch_yfinance_data_duplicate_prevention(self, monkeypatch, test_osakedata_db):
+    def test_fetch_yfinance_data_duplicate_prevention(self, monkeypatch, isolated_db):
         """Test that duplicate dates are not inserted."""
-        monkeypatch.setattr('main.DB_PATHS', {'osakedata': test_osakedata_db})
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
         
         # First, add some test data to simulate existing data
-        with sqlite3.connect(test_osakedata_db) as conn:
+        with sqlite3.connect(isolated_db) as conn:
             cursor = conn.cursor()
+            # Create table (since isolated_db is empty)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            # Ensure UNIQUE index exists (same as in fetch_yfinance_data)
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake, pvm)")
             cursor.execute("""
                 INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
                 VALUES ('DUPTEST', '2023-07-01', 100.0, 102.0, 99.0, 101.0, 1000000)
@@ -254,25 +269,50 @@ class TestYfinanceFlaskRoute:
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.yfinance
-    def test_fetch_yfinance_route_success(self, app_with_test_db):
+    def test_fetch_yfinance_route_success(self, isolated_db, monkeypatch):
         """Test successful YFinance fetch via web interface."""
-        with patch('main.yf.Ticker') as mock_ticker:
-            mock_hist = pd.DataFrame({
-                'Open': [100.0],
-                'High': [102.0],
-                'Low': [99.0],
-                'Close': [101.0],
-                'Volume': [1000000]
-            }, index=[pd.Timestamp('2023-07-01')])
-            mock_hist.index.name = 'Date'
-            mock_ticker.return_value.history.return_value = mock_hist
-            
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': 'TESTFLASK1'
-            })
+        # Configure app to use isolated database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db, 'analysis': isolated_db})
+        
+        # Ensure table exists with UNIQUE index
+        with sqlite3.connect(isolated_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake, pvm)")
+            conn.commit()
+        
+        app.config['TESTING'] = True
+        with app.test_client() as client:
+            with patch('main.yf.Ticker') as mock_ticker:
+                mock_hist = pd.DataFrame({
+                    'Open': [100.0],
+                    'High': [102.0],
+                    'Low': [99.0],
+                    'Close': [101.0],
+                    'Volume': [1000000]
+                }, index=[pd.Timestamp('2023-07-01')])
+                mock_hist.index.name = 'Date'
+                mock_ticker.return_value.history.return_value = mock_hist
+                
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': 'TESTFLASK1'
+                })
             
             assert response.status_code == 200
-            assert 'Tallennettu 1 riviä' in response.get_data(as_text=True)
+            response_text = response.get_data(as_text=True)
+            assert 'Onnistui!' in response_text
+            assert 'Tallennettu 1 riviä' in response_text
     
     @pytest.mark.integration
     @pytest.mark.web
@@ -301,51 +341,33 @@ class TestYfinanceFlaskRoute:
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.yfinance
-    def test_fetch_yfinance_route_multiple_tickers(self, app_with_test_db):
-        """Test YFinance route with multiple comma-separated tickers."""
-        with patch('main.yf.Ticker') as mock_ticker:
-            mock_hist = pd.DataFrame({
-                'Open': [100.0],
-                'High': [102.0],
-                'Low': [99.0],
-                'Close': [101.0],
-                'Volume': [1000000]
-            }, index=[pd.Timestamp('2023-07-01')])
-            mock_hist.index.name = 'Date'
-            mock_ticker.return_value.history.return_value = mock_hist
-            
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': 'TESTFLASK2, TESTFLASK3, TESTFLASK4'
-            })
-            
-            assert response.status_code == 200
-            assert 'Tallennettu 3 riviä' in response.get_data(as_text=True)
-    
-    @pytest.mark.integration
-    @pytest.mark.web
-    @pytest.mark.yfinance
-    def test_fetch_yfinance_route_invalid_ticker(self, app_with_test_db):
-        """Test YFinance route with invalid ticker."""
-        with patch('main.yf.Ticker') as mock_ticker:
-            # Return empty DataFrame for invalid ticker
-            mock_ticker.return_value.history.return_value = pd.DataFrame()
-            
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': 'INVALIDFLASK'
-            })
-            
-            assert response.status_code == 200
-            response_text = response.get_data(as_text=True)
-            assert 'INVALIDFLASK (ei dataa)' in response_text
-    
-    @pytest.mark.integration
-    @pytest.mark.web
-    @pytest.mark.yfinance
-    def test_fetch_yfinance_route_mixed_tickers(self, app_with_test_db):
-        """Test YFinance route with mix of valid and invalid tickers."""
-        def mock_ticker_side_effect(ticker):
-            mock_ticker = MagicMock()
-            if ticker == 'TESTFLASK5':
+    def test_fetch_yfinance_route_multiple_tickers(self, isolated_db, monkeypatch):
+        """Test YFinance route with multiple tickers."""
+        # Set up isolated test database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
+        
+        # Create the database table with UNIQUE index
+        conn = sqlite3.connect(isolated_db)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS osakedata (
+                ticker TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        
+        from main import app
+        app.config['TESTING'] = True
+        
+        with app.test_client() as client:
+            with patch('main.yf.Ticker') as mock_ticker:
                 mock_hist = pd.DataFrame({
                     'Open': [100.0],
                     'High': [102.0],
@@ -354,67 +376,212 @@ class TestYfinanceFlaskRoute:
                     'Volume': [1000000]
                 }, index=[pd.Timestamp('2023-07-01')])
                 mock_hist.index.name = 'Date'
-                mock_ticker.history.return_value = mock_hist
-            else:
-                mock_ticker.history.return_value = pd.DataFrame()
-            return mock_ticker
+                mock_ticker.return_value.history.return_value = mock_hist
+                
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': 'TESTFLASK2,TESTFLASK3'
+                })
+                
+                assert response.status_code == 200
+                response_text = response.get_data(as_text=True)
+                assert 'Onnistui!' in response_text
+                assert 'Tallennettu 2 riviä' in response_text
+
+    @pytest.mark.integration
+    @pytest.mark.web
+    @pytest.mark.yfinance
+    def test_fetch_yfinance_route_invalid_ticker(self, isolated_db, monkeypatch):
+        """Test YFinance route with invalid ticker."""
+        # Set up isolated test database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
         
-        with patch('main.yf.Ticker', side_effect=mock_ticker_side_effect):
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': 'TESTFLASK5, INVALIDFLASK2'
-            })
-            
-            assert response.status_code == 200
-            response_text = response.get_data(as_text=True)
-            assert 'Tallennettu 1 riviä' in response_text
-            assert 'INVALIDFLASK2 (ei dataa)' in response_text
+        # Create the database table with UNIQUE index
+        conn = sqlite3.connect(isolated_db)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS osakedata (
+                ticker TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        
+        from main import app
+        app.config['TESTING'] = True
+        
+        with app.test_client() as client:
+            with patch('main.yf.Ticker') as mock_ticker:
+                # Return empty DataFrame for invalid ticker
+                mock_ticker.return_value.history.return_value = pd.DataFrame()
+                
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': 'INVALIDFLASK'
+                })
+                
+                assert response.status_code == 200
+                response_text = response.get_data(as_text=True)
+                assert 'INVALIDFLASK (ei dataa)' in response_text
     
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.yfinance
-    def test_fetch_yfinance_route_case_insensitive(self, app_with_test_db):
+    def test_fetch_yfinance_route_mixed_tickers(self, isolated_db, monkeypatch):
+        """Test YFinance route with mix of valid and invalid tickers."""
+        # Set up isolated test database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
+        
+        # Create the database table with UNIQUE index
+        conn = sqlite3.connect(isolated_db)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS osakedata (
+                ticker TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        
+        from main import app
+        app.config['TESTING'] = True
+        
+        with app.test_client() as client:
+            def mock_ticker_side_effect(ticker):
+                mock_ticker = MagicMock()
+                if ticker == 'TESTFLASK5':
+                    mock_hist = pd.DataFrame({
+                        'Open': [100.0],
+                        'High': [102.0],
+                        'Low': [99.0],
+                        'Close': [101.0],
+                        'Volume': [1000000]
+                    }, index=[pd.Timestamp('2023-07-01')])
+                    mock_hist.index.name = 'Date'
+                    mock_ticker.history.return_value = mock_hist
+                else:
+                    mock_ticker.history.return_value = pd.DataFrame()
+                return mock_ticker
+            
+            with patch('main.yf.Ticker', side_effect=mock_ticker_side_effect):
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': 'TESTFLASK5, INVALIDFLASK2'
+                })
+                
+                assert response.status_code == 200
+                response_text = response.get_data(as_text=True)
+                assert 'Onnistui!' in response_text
+                assert 'Tallennettu 1 riviä' in response_text
+                assert 'INVALIDFLASK2 (ei dataa)' in response_text
+    
+    @pytest.mark.integration
+    @pytest.mark.web
+    @pytest.mark.yfinance
+    def test_fetch_yfinance_route_case_insensitive(self, isolated_db, monkeypatch):
         """Test YFinance route handles case insensitive input."""
-        with patch('main.yf.Ticker') as mock_ticker:
-            mock_hist = pd.DataFrame({
-                'Open': [100.0],
-                'High': [102.0],
-                'Low': [99.0],
-                'Close': [101.0],
-                'Volume': [1000000]
-            }, index=[pd.Timestamp('2023-07-01')])
-            mock_hist.index.name = 'Date'
-            mock_ticker.return_value.history.return_value = mock_hist
-            
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': 'testflask6, testflask7'
-            })
-            
-            assert response.status_code == 200
-            assert 'Tallennettu 2 riviä' in response.get_data(as_text=True)
+        # Set up isolated test database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
+        
+        # Create the database table with UNIQUE index
+        conn = sqlite3.connect(isolated_db)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS osakedata (
+                ticker TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        
+        from main import app
+        app.config['TESTING'] = True
+        
+        with app.test_client() as client:
+            with patch('main.yf.Ticker') as mock_ticker:
+                mock_hist = pd.DataFrame({
+                    'Open': [100.0],
+                    'High': [102.0],
+                    'Low': [99.0],
+                    'Close': [101.0],
+                    'Volume': [1000000]
+                }, index=[pd.Timestamp('2023-07-01')])
+                mock_hist.index.name = 'Date'
+                mock_ticker.return_value.history.return_value = mock_hist
+                
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': 'testflask6, testflask7'
+                })
+                
+                assert response.status_code == 200
+                response_text = response.get_data(as_text=True)
+                assert 'Onnistui!' in response_text
+                assert 'Tallennettu 2 riviä' in response_text
     
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.yfinance
-    def test_fetch_yfinance_route_special_characters(self, app_with_test_db):
+    def test_fetch_yfinance_route_special_characters(self, isolated_db, monkeypatch):
         """Test YFinance route with special characters and whitespace."""
-        with patch('main.yf.Ticker') as mock_ticker:
-            mock_hist = pd.DataFrame({
-                'Open': [100.0],
-                'High': [102.0],
-                'Low': [99.0],
-                'Close': [101.0],
-                'Volume': [1000000]
-            }, index=[pd.Timestamp('2023-07-01')])
-            mock_hist.index.name = 'Date'
-            mock_ticker.return_value.history.return_value = mock_hist
-            
-            response = app_with_test_db.post('/fetch_yfinance', data={
-                'tickers': '  TESTFLASK8  ,, , TESTFLASK9,  '
-            })
-            
-            assert response.status_code == 200
-            # Should handle cleaning and only process valid tickers
-            assert 'Tallennettu 2 riviä' in response.get_data(as_text=True)
+        # Set up isolated test database
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db})
+        
+        # Create the database table with UNIQUE index
+        conn = sqlite3.connect(isolated_db)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS osakedata (
+                ticker TEXT,
+                date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        
+        from main import app
+        app.config['TESTING'] = True
+        
+        with app.test_client() as client:
+            with patch('main.yf.Ticker') as mock_ticker:
+                mock_hist = pd.DataFrame({
+                    'Open': [100.0],
+                    'High': [102.0],
+                    'Low': [99.0],
+                    'Close': [101.0],
+                    'Volume': [1000000]
+                }, index=[pd.Timestamp('2023-07-01')])
+                mock_hist.index.name = 'Date'
+                mock_ticker.return_value.history.return_value = mock_hist
+                
+                response = client.post('/fetch_yfinance', data={
+                    'tickers': '  TESTFLASK8  ,, , TESTFLASK9,  '
+                })
+                
+                assert response.status_code == 200
+                # Should handle cleaning and only process valid tickers
+                response_text = response.get_data(as_text=True)
+                assert 'Onnistui!' in response_text
+                assert 'Tallennettu 2 riviä' in response_text
     
     @pytest.mark.integration
     @pytest.mark.web
