@@ -14,6 +14,10 @@ Flask web application for viewing stock data from multiple SQLite databases.
 - **Delete Operations**: Remove data with confirmation prompts
 - **Database Integration**: Direct SQLite database queries with pandas
 - **Dynamic Symbol Loading**: Automatically updates available symbols when switching databases
+- **CSV Mass Import**: Import stock data from CSV files with support for:
+  - **Individual Tickers**: Import specific symbols (e.g., "AAPL,MSFT")
+  - **Mass Import**: Import ALL symbols from CSV by leaving ticker field empty
+  - **YFinance Integration**: Fetch real-time data from Yahoo Finance API
 
 ## Databases
 
@@ -67,6 +71,21 @@ The application starts at: `http://localhost:5000`
 3. **Quick Access**: Click on available symbol badges to quickly search
 4. **Delete Data**: Use the delete button with confirmation for data removal
 5. **Navigation**: Smooth scrolling to results table
+6. **Import Data**: Use CSV or YFinance tabs to import new stock data
+
+### Data Import Features
+
+#### CSV Import
+- **Individual Import**: Enter specific ticker symbols (e.g., "AAPL,MSFT,GOOGL")
+- **Mass Import**: Leave ticker field **empty** to import ALL symbols from CSV file
+  - When ticker field is empty, shows "MASSA-AJO" message
+  - Imports all available symbols from `/home/kalle/projects/rawcandle/data/osakedata.csv`
+- **Source File**: `/home/kalle/projects/rawcandle/data/osakedata.csv`
+
+#### YFinance Import  
+- **Real-time Data**: Fetch current stock data from Yahoo Finance API
+- **Multiple Symbols**: Support for comma-separated ticker lists
+- **Automatic Validation**: Validates ticker symbols before import
 
 ### Palvelimen pysäytys
 
@@ -91,7 +110,7 @@ Sovellus hakee dataa tietokannasta: `/home/kalle/projects/rawcandle/data/osakeda
 6. **Automaattinen scrollaus**: Sivu skrollaa automaattisesti tuloksiin
 7. **Kopioi-nappi**: Kopioi löytyneet symbolit takaisin hakukenttään
 
-### Esimerkkihaut
+**Esimerkkihaut:**
 
 **Tarkka haku:**
 - Yksi osake: `AAPL`
@@ -101,6 +120,11 @@ Sovellus hakee dataa tietokannasta: `/home/kalle/projects/rawcandle/data/osakeda
 - Kaikki AA-alkuiset: `AA`
 - Useita alkuja: `AA, GOO, MS`
 - Sekaisin: `AAPL, GOO, TSLA`
+
+**CSV Import esimerkit:**
+- Yksittäiset symbolit: `^IXIC, ^GSPC, AAPL`
+- **Massa-ajo**: Jätä ticker-kenttä tyhjäksi → Importtaa kaikki CSV:n symbolit
+- Tulos näyttää "MASSA-AJO" viestin tyhjällä kentällä
 
 **Huom:** Isot/pienet kirjaimet muunnetaan automaattisesti isoiksi
 
@@ -135,10 +159,27 @@ Sovellus lukee `osakedata`-taulua, jossa on seuraavat sarakkeet:
 - `GET /` - Pääsivu
 - `POST /search` - Osakkeiden haku
 - `GET /api/symbols` - JSON-lista saatavilla olevista symboleista
+- `POST /fetch_csv` - CSV-datan tuonti (yksittäiset symbolit tai massa-ajo)
+- `POST /fetch_yfinance` - YFinance-datan tuonti reaaliaikaisesta API:sta
 
 ## Kehitys
 
 Sovellus käyttää Flask debug-tilaa kehityksessä. Tuotannossa aseta `debug=False`.
+
+### CSV Massa-Import Tekninen Toteutus
+
+**Massa-ajo tunnistus:**
+- Tyhjä ticker-kenttä (`''` tai `None`) aktivoi massa-ajon
+- Funktio `fetch_csv_data()` lukee koko CSV-tiedoston
+- Käsittelee kaikki CSV:n rivit automaattisesti
+- Palauttaa "MASSA-AJO" viestin käyttöliittymään
+
+**CSV-tiedoston rakenne:**
+```
+^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
+^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000
+AAPL,2023-07-03,150.00,155.00,149.00,152.00,50000000
+```
 
 ### Portin ja hostin muutos
 
