@@ -1,43 +1,72 @@
-# Osakedata Web Viewer
+# Stock Data Web Viewer
 
-Flask-pohjainen web-sovellus osakedata-tietokannan tarkasteluun. Sovellus lukee osakedata.db-tietokantaa ja näyttää osakkeiden tiedot selaimessa.
+Flask web application for viewing stock data from multiple SQLite databases.
 
-## Ominaisuudet
+## Features
 
-- Web-käyttöliittymä osakedata-tietokannan tarkasteluun
-- Haku yhdellä tai useammalla osake-symbolilla
-- Responsiivinen Bootstrap-käyttöliittymä
-- Saatavilla olevien symbolien listaus
-- Datan näyttö järjestetyssä taulukossa
+- **Multi-Database Support**: Switch between different data sources
+  - **Osakedata**: OHLCV stock market data
+  - **Analysis**: Candlestick pattern analysis results
+- **Web Interface**: Clean, responsive web UI using Bootstrap
+- **Partial Search**: Search by full ticker symbol or partial matches (e.g., "AA" finds all symbols starting with "AA")
+- **Data Visualization**: Display data in sortable HTML tables
+- **Click Navigation**: Click on available symbol badges to quickly search
+- **Delete Operations**: Remove data with confirmation prompts
+- **Database Integration**: Direct SQLite database queries with pandas
+- **Dynamic Symbol Loading**: Automatically updates available symbols when switching databases
 
-## Vaatimukset
+## Databases
+
+The application supports two databases:
+
+### 1. Osakedata (OHLCV Stock Data)
+- **Path**: `/home/kalle/projects/rawcandle/data/osakedata.db`
+- **Table**: `osakedata`
+- **Columns**: `id, osake, pvm, open, high, low, close, volume`
+
+### 2. Analysis (Candlestick Pattern Analysis)
+- **Path**: `/home/kalle/projects/rawcandle/analysis/analysis.db`
+- **Table**: `analysis_findings`
+- **Columns**: `id, ticker, date, pattern`
+
+## Requirements
 
 - Python 3.7+
-- Flask
-- pandas
-- SQLite3 (sisäänrakennettu)
+- Flask 2.3.0+
+- pandas 2.0.0+
+- SQLite3 (built-in)
 
-## Asennus
+## Installation
 
-1. Kloonaa tai lataa projekti
-2. Asenna riippuvuudet:
+1. Clone or download the project
+2. Create virtual environment and install dependencies:
    ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Linux/Mac
    pip install -r requirements.txt
    ```
 
-## Käyttö
+## Usage
 
-### Web-sovelluksen käynnistys
+### Starting the Web Application
 
 ```bash
-# Vaihtoehto 1: Käynnistysskriptillä (suositeltu)
+# Option 1: Using startup script (recommended)
 ./start_server.sh
 
-# Vaihtoehto 2: Suoraan Python-komennolla
+# Option 2: Direct Python command
 python main.py
 ```
 
-Sovellus käynnistyy osoitteeseen: `http://localhost:5000`
+The application starts at: `http://localhost:5000`
+
+### Using the Application
+
+1. **Select Database**: Choose between "Osakedata (OHLCV)" or "Kynttiläkuvioanalyysi" from the dropdown
+2. **Search Data**: Enter symbol(s) or partial symbols (e.g., "AAPL" or just "AA")
+3. **Quick Access**: Click on available symbol badges to quickly search
+4. **Delete Data**: Use the delete button with confirmation for data removal
+5. **Navigation**: Smooth scrolling to results table
 
 ### Palvelimen pysäytys
 

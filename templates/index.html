@@ -47,15 +47,27 @@
     <div class="container">
         <div class="row">
             <div class="col-md-8 mx-auto">
-                <h1 class="text-center mb-4">📈 Osakedata Viewer</h1>
+                <h1 class="text-center mb-4">📈 Stock Data Viewer</h1>
                 
                 <div class="card">
                     <div class="card-header">
-                        <h5>Hae tai poista osakedata</h5>
+                        <h5>Hae tai poista data</h5>
                     </div>
                     <div class="card-body">
                         <div class="mb-3">
-                            <label for="tickers" class="form-label">Osake-symbolit tai niiden alut (pilkulla erotettuna):</label>
+                            <label for="db_type" class="form-label">Valitse tietokanta:</label>
+                            <select class="form-select" id="db_type" name="db_type" onchange="updateDatabase()">
+                                <option value="osakedata" {% if not current_db or current_db == 'osakedata' %}selected{% endif %}>
+                                    📊 Osakedata (OHLCV-tiedot)
+                                </option>
+                                <option value="analysis" {% if current_db == 'analysis' %}selected{% endif %}>
+                                    🕯️ Kynttiläkuvioanalyysi
+                                </option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="tickers" class="form-label">Symbolit tai niiden alut (pilkulla erotettuna):</label>
                             <input type="text" class="form-control" id="tickers" name="tickers" 
                                    placeholder="Esim: AAPL, GOOGL tai vain AA, GOO" 
                                    value="{{ request.form.get('tickers', '') or request.form.get('delete_tickers', '') }}">
@@ -66,6 +78,7 @@
                             <div class="col-md-6">
                                 <form method="POST" action="/search" class="d-inline">
                                     <input type="hidden" name="tickers" id="search_tickers">
+                                    <input type="hidden" name="db_type" id="search_db_type">
                                     <button type="submit" class="btn btn-primary w-100" onclick="copyTickersToSearch()">
                                         🔍 Hae data
                                     </button>
@@ -74,6 +87,7 @@
                             <div class="col-md-6">
                                 <form method="POST" action="/delete" class="d-inline" onsubmit="return confirmDeleteSimple()">
                                     <input type="hidden" name="delete_tickers" id="delete_tickers_hidden">
+                                    <input type="hidden" name="db_type" id="delete_db_type">
                                     <input type="hidden" name="confirm_delete" value="kyllä">
                                     <button type="submit" class="btn btn-danger w-100" onclick="copyTickersToDelete()">
                                         🗑️ Poista data
@@ -93,7 +107,7 @@
 
                 {% if available_symbols %}
                 <div class="info-box">
-                    <h6>Saatavilla olevat symbolit tietokannassa:</h6>
+                    <h6>{{ db_label or 'Saatavilla olevat symbolit' }} - Symbolit tietokannassa:</h6>
                     <div>
                         {% for symbol in available_symbols %}
                             <span class="symbol-badge">{{ symbol }}</span>
@@ -147,28 +161,56 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Kopioi tickers-kentän arvo piilokenttiin hakua varten
+        // Kopioi ticker-arvot ja tietokantavalinta piilokenttiin haku-lomakkeelle
         function copyTickersToSearch() {
             const tickers = document.getElementById('tickers').value;
+            const dbType = document.getElementById('db_type').value;
             document.getElementById('search_tickers').value = tickers;
-            return true;
+            document.getElementById('search_db_type').value = dbType;
         }
 
-        // Kopioi tickers-kentän arvo piilokenttiin poistoa varten
+        // Kopioi ticker-arvot ja tietokantavalinta piilokenttiin poisto-lomakkeelle
         function copyTickersToDelete() {
             const tickers = document.getElementById('tickers').value;
+            const dbType = document.getElementById('db_type').value;
             document.getElementById('delete_tickers_hidden').value = tickers;
-            
-            // Näytä varmistusruutu
-            document.getElementById('deleteConfirmBox').style.display = 'block';
-            
-            // Scroll varmistusruutuun
-            document.getElementById('deleteConfirmBox').scrollIntoView({ behavior: 'smooth' });
-            
-            return false; // Estä lomakkeen lähetys toistaiseksi
+            document.getElementById('delete_db_type').value = dbType;
         }
 
-        // Yksinkertainen varmistus checkboxilla
+        // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan
+        function updateDatabase() {
+            const dbType = document.getElementById('db_type').value;
+            
+            // Lataa symbolit AJAX:lla
+            fetch(`/api/symbols?db_type=${dbType}`)
+                .then(response => response.json())
+                .then(symbols => {
+                    // Päivitä symbol-badget
+                    const container = document.querySelector('.info-box div');
+                    if (container) {
+                        container.innerHTML = '';
+                        symbols.forEach(symbol => {
+                            const badge = document.createElement('span');
+                            badge.className = 'symbol-badge';
+                            badge.textContent = symbol;
+                            badge.style.cursor = 'pointer';
+                            badge.addEventListener('click', function() {
+                                document.getElementById('tickers').value = this.textContent;
+                            });
+                            container.appendChild(badge);
+                        });
+                        
+                        // Päivitä määrä
+                        const countElement = container.parentNode.querySelector('.text-muted');
+                        if (countElement) {
+                            countElement.textContent = `Yhteensä ${symbols.length} symbolia`;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Virhe symbolien lataamisessa:', error);
+                });
+        }        // Yksinkertainen varmistus checkboxilla
         function confirmDeleteSimple() {
             const tickers = document.getElementById('delete_tickers_hidden').value.trim();
             const checkbox = document.getElementById('confirmDelete');
