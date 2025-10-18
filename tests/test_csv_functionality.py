@@ -35,13 +35,35 @@ class TestCSVDataFetching:
     
     @pytest.mark.unit
     @pytest.mark.csv
-    def test_fetch_csv_data_empty_tickers(self, isolated_db):
-        """Testi: Tyhjät tickerit."""
-        success, message, count = fetch_csv_data([])
+    def test_fetch_csv_data_mass_import_none(self, isolated_db):
+        """Testi: Massa-ajo None parametrilla."""
+        csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
+^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000"""
         
-        assert success is False
-        assert count == 0
-        assert "Ei tickereitä annettu" in message
+        with patch("os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=csv_content)):
+                success, message, count = fetch_csv_data(None)
+                
+        assert success is True
+        assert count == 2
+        assert "MASSA-AJO" in message
+        assert "2 osaketta" in message
+    
+    @pytest.mark.unit
+    @pytest.mark.csv
+    def test_fetch_csv_data_mass_import_empty_list(self, isolated_db):
+        """Testi: Massa-ajo tyhjällä listalla."""
+        csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
+^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000"""
+        
+        with patch("os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=csv_content)):
+                success, message, count = fetch_csv_data([])
+                
+        assert success is True
+        assert count == 2
+        assert "MASSA-AJO" in message
+        assert "2 osaketta" in message
     
     @pytest.mark.unit
     @pytest.mark.csv
@@ -166,9 +188,27 @@ class TestCSVFlaskRoutes:
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.csv
+    def test_fetch_csv_route_mass_import(self, client, isolated_db):
+        """Testi: CSV massa-ajo tyhjällä ticker-kentällä."""
+        csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
+^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000"""
+        
+        with patch("os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=csv_content)):
+                response = client.post('/fetch_csv', data={'tickers': ''})
+                
+        assert response.status_code == 200
+        response_text = response.get_data(as_text=True)
+        assert 'MASSA-AJO' in response_text
+        # Tarkistaa että saa HTML-sivun takaisin
+        assert b'<!DOCTYPE' in response.data or b'<html' in response.data
+    
+    @pytest.mark.integration
+    @pytest.mark.web
+    @pytest.mark.csv
     def test_fetch_csv_route_success(self, client, isolated_db):
         """Testi: CSV-reitti palauttaa HTML-sivun."""
-        response = client.post('/fetch_csv', data={'tickers': ''})
+        response = client.post('/fetch_csv', data={'tickers': 'TEST'})
         assert response.status_code == 200
         # Tarkistaa että saa HTML-sivun takaisin
         assert b'<!DOCTYPE' in response.data or b'<html' in response.data
@@ -176,10 +216,16 @@ class TestCSVFlaskRoutes:
     @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.csv
-    def test_fetch_csv_route_empty_input(self, client, isolated_db):
-        """Testi: Tyhjä syöte Flask-reitillä."""
-        response = client.post('/fetch_csv', data={'tickers': ''})
+    def test_fetch_csv_route_specific_tickers(self, client, isolated_db):
+        """Testi: Määrättyjen tickereiden haku CSV:stä."""
+        csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
+^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000
+AAPL,2023-07-03,150.00,155.00,149.00,152.00,50000000"""
         
+        with patch("os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=csv_content)):
+                response = client.post('/fetch_csv', data={'tickers': '^IXIC,AAPL'})
+                
         assert response.status_code == 200
         assert b'<!DOCTYPE' in response.data or b'<html' in response.data
     
@@ -248,7 +294,9 @@ class TestCSVFormHandling:
                 response = client.post('/fetch_csv', data={'tickers': '^IXIC,^GSPC'})
             
         assert response.status_code == 200
-        assert b'Tallennettu 2 rivi' in response.data or b'success' in response.data    @pytest.mark.integration
+        assert b'Tallennettu 2 rivi' in response.data or b'success' in response.data
+    
+    @pytest.mark.integration
     @pytest.mark.web
     @pytest.mark.csv
     def test_csv_form_case_insensitive(self, client, isolated_db):

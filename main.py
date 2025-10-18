@@ -373,23 +373,31 @@ def fetch_yfinance_data(tickers):
         return False, f"Tietokantavirhe: {str(e)}", 0
 
 
-def fetch_csv_data(tickers):
-    """Lataa osaketiedot CSV-tiedostosta /home/kalle/projects/rawcandle/data/osakedata.csv"""
+def fetch_csv_data(tickers=None):
+    """
+    Lataa osaketiedot CSV-tiedostosta /home/kalle/projects/rawcandle/data/osakedata.csv
+    
+    MASSA-AJO: Jos tickers=None tai tyhjä, ladataan KAIKKI CSV:ssä olevat osakkeet.
+    Jos tickers annettu, ladataan vain ne tickerit.
+    """
     import csv
     from datetime import datetime
     
-    if not tickers:
-        return False, "Ei tickereitä annettu", 0
+    # Massa-ajo: Jos ei tickereitä annettu, ladataan kaikki CSV:stä
+    mass_import = not tickers or (isinstance(tickers, list) and not any(tickers))
     
-    # Siivoa ja validoi tickerit
-    clean_tickers = []
-    for ticker in tickers:
-        ticker = ticker.strip().upper()
-        if ticker and ticker.replace('.', '').replace('-', '').replace('^', '').isalnum():
-            clean_tickers.append(ticker)
-    
-    if not clean_tickers:
-        return False, "Ei kelvollisia tickereitä annettu", 0
+    if not mass_import:
+        # Siivoa ja validoi tickerit vain jos ei massa-ajoa
+        clean_tickers = []
+        for ticker in tickers:
+            ticker = ticker.strip().upper()
+            if ticker and ticker.replace('.', '').replace('-', '').replace('^', '').isalnum():
+                clean_tickers.append(ticker)
+        
+        if not clean_tickers:
+            return False, "Ei kelvollisia tickereitä annettu", 0
+    else:
+        clean_tickers = None  # Massa-ajossa ei rajoiteta tickereitä
     
     csv_file_path = "/home/kalle/projects/rawcandle/data/osakedata.csv"
     
@@ -448,8 +456,8 @@ def fetch_csv_data(tickers):
                     # Ensimmäinen kenttä on ticker
                     ticker = fields[0].strip()
                     
-                    # Tarkista että ticker on pyydettyjen joukossa
-                    if ticker not in clean_tickers:
+                    # Massa-ajossa käsitellään kaikki tickerit, muuten vain pyydetyt
+                    if not mass_import and clean_tickers and ticker not in clean_tickers:
                         continue
                     
                     found_tickers.add(ticker)
@@ -500,20 +508,27 @@ def fetch_csv_data(tickers):
             
             conn.commit()
             
-            # Tarkista mitkä tickerit löytyivät
-            not_found_tickers = [t for t in clean_tickers if t not in found_tickers]
-            if not_found_tickers:
-                failed_tickers.extend([f"{ticker} (ei löytynyt CSV:stä)" for ticker in not_found_tickers])
+            # Tarkista mitkä tickerit löytyivät (vain jos ei massa-ajo)
+            if not mass_import and clean_tickers:
+                not_found_tickers = [t for t in clean_tickers if t not in found_tickers]
+                if not_found_tickers:
+                    failed_tickers.extend([f"{ticker} (ei löytynyt CSV:stä)" for ticker in not_found_tickers])
             
             # Muodosta vastausviesti
             if saved_count > 0:
-                success_msg = f"Tallennettu {saved_count} riviä CSV:stä"
+                if mass_import:
+                    success_msg = f"MASSA-AJO: Tallennettu {saved_count} riviä CSV:stä ({len(found_tickers)} osaketta)"
+                else:
+                    success_msg = f"Tallennettu {saved_count} riviä CSV:stä"
+                
                 if failed_tickers:
                     return True, f"{success_msg}. Epäonnistui: {', '.join(failed_tickers)}", saved_count
                 else:
                     return True, success_msg, saved_count
             else:
-                if failed_tickers:
+                if mass_import:
+                    return False, "MASSA-AJO: Ei tallennettu yhtään uutta riviä CSV:stä (kaikki jo olemassa)", 0
+                elif failed_tickers:
                     return False, f"Ei tallennettu yhtään riviä CSV:stä. Epäonnistui: {', '.join(failed_tickers)}", 0
                 else:
                     return False, "Ei tallennettu yhtään riviä CSV:stä (kaikki jo olemassa)", 0
@@ -679,22 +694,22 @@ def fetch_yfinance_route():
 
 @app.route('/fetch_csv', methods=['POST'])
 def fetch_csv_route():
-    """Hae OHLCV-data CSV-tiedostosta."""
+    """
+    Hae OHLCV-data CSV-tiedostosta.
+    
+    MASSA-AJO: Jos ticker-kenttä on tyhjä, ladataan KAIKKI CSV:ssä olevat osakkeet.
+    Jos tickereitä on annettu, ladataan vain ne.
+    """
     ticker_input = request.form.get('tickers', '').strip()
     
     if not ticker_input:
-        return render_template('index.html', 
-                             error="Anna vähintään yksi ticker-symboli",
-                             available_symbols=get_available_symbols('osakedata'),
-                             current_db='osakedata',
-                             db_label=get_db_label('osakedata'))
-    
-    # Jaa tickerit pilkulla
-    tickers = [t.strip().upper() for t in ticker_input.split(',') if t.strip()]
-    
-    # Hae data CSV:stä
-    success, message, count = fetch_csv_data(tickers)
-    
+        # MASSA-AJO: Tyhjä syöte = lataa kaikki CSV:ssä olevat osakkeet
+        success, message, count = fetch_csv_data(None)
+    else:
+        # Jaa tickerit pilkulla ja hae vain ne
+        tickers = [t.strip().upper() for t in ticker_input.split(',') if t.strip()]
+        success, message, count = fetch_csv_data(tickers)
+    # Renderöi tulos
     if success:
         return render_template('index.html', 
                              success=message,
