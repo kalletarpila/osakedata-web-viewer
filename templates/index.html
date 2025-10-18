@@ -88,19 +88,20 @@
                                 <form method="POST" action="/delete" class="d-inline" onsubmit="return confirmDeleteSimple()">
                                     <input type="hidden" name="delete_tickers" id="delete_tickers_hidden">
                                     <input type="hidden" name="db_type" id="delete_db_type">
-                                    <input type="hidden" name="confirm_delete" value="kyllä">
+                                    <input type="hidden" name="confirm_delete" id="confirm_delete_hidden" value="">
                                     <button type="submit" class="btn btn-danger w-100" onclick="copyTickersToDelete()">
                                         🗑️ Poista data
                                     </button>
+                                    
+                                    <!-- Varmistus-checkbox lomakkeen sisällä -->
+                                    <div class="form-check mt-3">
+                                        <input class="form-check-input" type="checkbox" id="confirmDelete">
+                                        <label class="form-check-label text-danger" for="confirmDelete">
+                                            <strong>Vahvistan että haluan poistaa pysyvästi kaikki annettujen symbolien tiedot</strong>
+                                        </label>
+                                    </div>
                                 </form>
                             </div>
-                        </div>
-                        
-                        <div class="form-check mt-3" id="deleteConfirmBox" style="display: none;">
-                            <input class="form-check-input" type="checkbox" id="confirmDelete">
-                            <label class="form-check-label text-danger" for="confirmDelete">
-                                <strong>Vahvistan että haluan poistaa pysyvästi kaikki annettujen symbolien tiedot</strong>
-                            </label>
                         </div>
                     </div>
                 </div>
@@ -225,6 +226,9 @@
                 checkbox.focus();
                 return false;
             }
+            
+            // Aseta vahvistus piilotettuun kenttään
+            document.getElementById('confirm_delete_hidden').value = 'kyllä';
             
             return confirm(`Poistetaan KAIKKI tiedot symboleille: ${tickers}\n\nJatketaanko?`);
         }
