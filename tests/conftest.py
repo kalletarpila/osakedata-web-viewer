@@ -107,6 +107,10 @@ class DatabaseFixtures:
     @staticmethod
     def create_empty_db(db_path, db_type='osakedata'):
         """Create empty test database."""
+        # Ensure we start with a clean slate by removing any existing file
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -164,7 +168,10 @@ def test_analysis_db(temp_test_dir):
 @pytest.fixture
 def empty_osakedata_db(temp_test_dir):
     """Create empty osakedata test database."""
-    db_path = os.path.join(temp_test_dir, 'empty_osakedata.db')
+    # Use unique filename for each test to ensure complete isolation
+    import uuid
+    unique_id = str(uuid.uuid4())[:8]
+    db_path = os.path.join(temp_test_dir, f'empty_osakedata_{unique_id}.db')
     DatabaseFixtures.create_empty_db(db_path, 'osakedata')
     return db_path
 

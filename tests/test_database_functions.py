@@ -22,16 +22,23 @@ class TestDatabaseFunctions:
     
     @pytest.mark.unit
     @pytest.mark.db
-    def test_get_db_path_valid_types(self):
+    def test_get_db_path_valid_types(self, monkeypatch, temp_test_dir):
         """Test get_db_path returns correct paths for valid database types."""
+        # Patch DB_PATHS to use safe test paths
+        import main
+        test_db_paths = {
+            'osakedata': os.path.join(temp_test_dir, 'test_osakedata.db'),
+            'analysis': os.path.join(temp_test_dir, 'test_analysis.db')
+        }
+        monkeypatch.setattr(main, 'DB_PATHS', test_db_paths)
+        
         # Test default osakedata
-        assert 'osakedata.db' in get_db_path('osakedata')
+        assert 'test_osakedata.db' in get_db_path('osakedata')
         
         # Test analysis database
-        assert 'analysis.db' in get_db_path('analysis')
+        assert 'test_analysis.db' in get_db_path('analysis')
         
-        # Test invalid type defaults to osakedata
-        # Kun tietokantatyyppiä ei löydy, palautetaan testeidenaikainen dummy-polku
+        # Test invalid type defaults to dummy path
         result = get_db_path('invalid_type')
         assert result == '/tmp/dummy.db'
     

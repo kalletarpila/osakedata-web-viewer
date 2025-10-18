@@ -8,6 +8,8 @@ from flask import Flask, render_template, request, jsonify
 import sqlite3
 import pandas as pd
 import os
+import yfinance as yf
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -253,6 +255,121 @@ def clear_database(db_type='osakedata'):
     except Exception as e:
         return False, f"Virhe tietokannan tyhjentämisessä: {str(e)}", 0
 
+
+def fetch_yfinance_data(tickers):
+    """
+    Hae OHLCV-data Yahoo Financesta annetuille tickereille.
+    Hakujakso: 1.7.2023 - 30.9.2025
+    Palauttaa (success, message, saved_count)
+    """
+    if not isinstance(tickers, list):
+        tickers = [tickers]
+    
+    # Siivoa ja yhdistele tickerit
+    clean_tickers = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
+    
+    if not clean_tickers:
+        return False, "Ei kelvollisia tickereitä annettu", 0
+    
+    saved_count = 0
+    failed_tickers = []
+    
+    # Hakujakso: 1.7.2023 - 30.9.2025
+    start_date = "2023-07-01"
+    end_date = "2025-09-30"
+    
+    db_path = get_db_path('osakedata')
+    
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Varmista että taulu on olemassa
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            
+            for ticker in clean_tickers:
+                try:
+                    # Hae data YFinancesta
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(start=start_date, end=end_date)
+                    
+                    # Tarkista että dataa löytyi
+                    if hist.empty:
+                        failed_tickers.append(f"{ticker} (ei dataa)")
+                        continue
+                    
+                    # Käsittele data
+                    hist.reset_index(inplace=True)
+                    
+                    # Tallenna rivit tietokantaan
+                    ticker_saved = 0
+                    for _, row in hist.iterrows():
+                        # Ohita rivit joissa on NaN-arvoja
+                        if pd.isna([row['Open'], row['High'], row['Low'], row['Close'], row['Volume']]).any():
+                            continue
+                        
+                        date_str = row['Date'].strftime('%Y-%m-%d')
+                        
+                        # Tarkista onko päivämäärä jo olemassa
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
+                            (ticker, date_str)
+                        )
+                        
+                        if cursor.fetchone()[0] == 0:  # Ei ole olemassa
+                            cursor.execute("""
+                                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                ticker,
+                                date_str,
+                                float(row['Open']),
+                                float(row['High']),
+                                float(row['Low']),
+                                float(row['Close']),
+                                int(row['Volume'])
+                            ))
+                            ticker_saved += 1
+                    
+                    if ticker_saved > 0:
+                        saved_count += ticker_saved
+                    else:
+                        failed_tickers.append(f"{ticker} (kaikki päivät jo olemassa)")
+                        
+                except Exception as e:
+                    failed_tickers.append(f"{ticker} (virhe: {str(e)})")
+                    continue
+            
+            conn.commit()
+            
+            # Muodosta vastausviesti
+            if saved_count > 0:
+                success_msg = f"Tallennettu {saved_count} riviä"
+                if failed_tickers:
+                    return True, f"{success_msg}. Epäonnistui: {', '.join(failed_tickers)}", saved_count
+                else:
+                    return True, success_msg, saved_count
+            else:
+                if failed_tickers:
+                    return False, f"Ei tallennettu yhtään riviä. Epäonnistui: {', '.join(failed_tickers)}", 0
+                else:
+                    return False, "Ei tallennettu yhtään riviä", 0
+                    
+    except Exception as e:
+        return False, f"Tietokantavirhe: {str(e)}", 0
+
+
 @app.route('/')
 def index():
     """Pääsivu."""
@@ -374,6 +491,39 @@ def delete_stocks():
                              available_symbols=get_available_symbols(db_type),
                              current_db=db_type,
                              db_label=get_db_label(db_type))
+
+
+@app.route('/fetch_yfinance', methods=['POST'])
+def fetch_yfinance_route():
+    """Hae OHLCV-data Yahoo Financesta."""
+    ticker_input = request.form.get('tickers', '').strip()
+    
+    if not ticker_input:
+        return render_template('index.html', 
+                             error="Anna vähintään yksi ticker-symboli",
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+    
+    # Jaa tickerit pilkulla
+    tickers = [t.strip().upper() for t in ticker_input.split(',') if t.strip()]
+    
+    # Hae data YFinancesta
+    success, message, count = fetch_yfinance_data(tickers)
+    
+    if success:
+        return render_template('index.html', 
+                             success=message,
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+    else:
+        return render_template('index.html', 
+                             error=message,
+                             available_symbols=get_available_symbols('osakedata'),
+                             current_db='osakedata',
+                             db_label=get_db_label('osakedata'))
+
 
 @app.route('/clear_database', methods=['POST'])
 def clear_database_route():

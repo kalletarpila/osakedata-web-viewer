@@ -118,8 +118,9 @@
                             </div>
                         </div>
                         
-                        <div class="row">
-                            <div class="col-md-4">
+                        <!-- Ensimmäinen rivi: Haku-painikkeet -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
                                 <form method="POST" action="/search" class="d-inline">
                                     <input type="hidden" name="tickers" id="search_tickers">
                                     <input type="hidden" name="db_type" id="search_db_type">
@@ -128,7 +129,19 @@
                                     </button>
                                 </form>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
+                                <form method="POST" action="/fetch_yfinance" class="d-inline">
+                                    <input type="hidden" name="tickers" id="yfinance_tickers">
+                                    <button type="submit" class="btn btn-success w-100" onclick="copyTickersToYfinance()">
+                                        📈 Hae YFinancesta
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        
+                        <!-- Toinen rivi: Muut toiminnot -->
+                        <div class="row">
+                            <div class="col-md-6">
                                 <form method="POST" action="/delete" class="d-inline" onsubmit="return confirmDeleteSimple()">
                                     <input type="hidden" name="delete_tickers" id="delete_tickers_hidden">
                                     <input type="hidden" name="db_type" id="delete_db_type">
@@ -146,7 +159,7 @@
                                     </div>
                                 </form>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <form method="POST" action="/clear_database" onsubmit="return confirmClearDatabase()">
                                     <input type="hidden" name="db_type" id="clear_db_type">
                                     <input type="hidden" name="confirm_clear" id="confirm_clear_hidden" value="">
@@ -305,6 +318,12 @@
             const dbType = document.getElementById('db_type').value;
             document.getElementById('delete_tickers_hidden').value = tickers;
             document.getElementById('delete_db_type').value = dbType;
+        }
+
+        // Kopioi ticker-arvot YFinance-lomakkeelle
+        function copyTickersToYfinance() {
+            const tickers = document.getElementById('tickers').value;
+            document.getElementById('yfinance_tickers').value = tickers;
         }
 
                 // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan
