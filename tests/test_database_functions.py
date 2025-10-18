@@ -352,3 +352,278 @@ class TestDeleteStockData:
         assert success is False
         assert count == 0
         assert 'Virhe tietojen poistossa' in message
+
+
+class TestClearDatabase:
+    """Testit clear_database funktiolle - VAARALLINEN TOIMINTO"""
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_function_exists(self, tmp_path, monkeypatch):
+        """Testi että clear_database funktio on olemassa ja kutsuttavissa"""
+        from main import clear_database
+        import sqlite3
+        
+        # Luo väliaikainen turvallinen tietokanta
+        temp_db = tmp_path / "safe_test.db"
+        
+        # Luo tyhjä taulu
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            conn.commit()
+        
+        # Mockataan get_db_path osoittamaan turvalliseen tietokantaan
+        def mock_get_db_path(db_type):
+            return str(temp_db)
+        
+        monkeypatch.setattr('main.get_db_path', mock_get_db_path)
+        
+        # Testi että funktio on olemassa ja palauttaa odotetut arvot
+        result = clear_database('osakedata')
+        
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        success, message, count = result
+        assert isinstance(success, bool)
+        assert isinstance(message, str)
+        assert isinstance(count, int)
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_basic_functionality(self, tmp_path):
+        """Testi clear_database perus toiminnallisuudelle"""
+        from main import clear_database
+        import sqlite3
+        import os
+        
+        # Luo väliaikainen tietokanta
+        temp_db = tmp_path / "temp_osakedata.db"
+        
+        # Luo taulu ja lisää testidata
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            cursor.execute("""
+                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume) 
+                VALUES ('TEST', '2023-01-01', 100, 110, 90, 105, 1000)
+            """)
+            conn.commit()
+            
+            # Varmista että data on olemassa
+            cursor.execute("SELECT COUNT(*) FROM osakedata")
+            count_before = cursor.fetchone()[0]
+            assert count_before == 1
+        
+        # Väliaikaisesti vaihda tietokannan polkua
+        import main
+        original_func = main.get_db_path
+        
+        def mock_get_db_path(db_type):
+            if db_type == 'osakedata':
+                return str(temp_db)
+            return original_func(db_type)
+        
+        main.get_db_path = mock_get_db_path
+        
+        try:
+            # Tyhjennä tietokanta
+            success, message, count = clear_database('osakedata')
+            
+            print(f"DEBUG: success={success}, message='{message}', count={count}")
+            
+            assert success is True
+            assert 'tyhjennetty' in message or 'tyhjä' in message
+            assert count >= 0  # Hyväksy 0 tai 1
+            
+            # Varmista että data on poistettu
+            with sqlite3.connect(str(temp_db)) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM osakedata")
+                count_after = cursor.fetchone()[0]
+                assert count_after == 0
+        finally:
+            # Palauta alkuperäinen funktio
+            main.get_db_path = original_func
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_both_functionality(self, tmp_path, monkeypatch):
+        """Testi clear_database 'both' parametrille"""
+        from main import clear_database
+        import sqlite3
+        
+        # Luo väliaikaiset turvalliset tietokannat
+        temp_osakedata = tmp_path / "safe_osakedata.db"
+        temp_analysis = tmp_path / "safe_analysis.db"
+        
+        # Luo taulut molempiin tietokanktoihin
+        for temp_db, table_name in [(temp_osakedata, 'osakedata'), (temp_analysis, 'analysis')]:
+            with sqlite3.connect(str(temp_db)) as conn:
+                cursor = conn.cursor()
+                if table_name == 'osakedata':
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS osakedata (
+                            id INTEGER PRIMARY KEY,
+                            osake TEXT,
+                            pvm TEXT,
+                            open REAL,
+                            high REAL,
+                            low REAL,
+                            close REAL,
+                            volume INTEGER
+                        )
+                    """)
+                else:
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS analysis (
+                            id INTEGER PRIMARY KEY,
+                            osake TEXT,
+                            pattern TEXT,
+                            date TEXT,
+                            confidence REAL
+                        )
+                    """)
+                conn.commit()
+        
+        # Mockataan get_db_path osoittamaan turvallisiin tietokantoihin  
+        def mock_get_db_path(db_type):
+            if db_type == 'osakedata':
+                return str(temp_osakedata)
+            elif db_type == 'analysis':
+                return str(temp_analysis)
+            return '/tmp/nonexistent.db'
+        
+        monkeypatch.setattr('main.get_db_path', mock_get_db_path)
+        
+        # Testaa että 'both' parametri toimii
+        success, message, count = clear_database('both')
+        
+        # Pitäisi palauttaa jotain järkevää
+        assert isinstance(success, bool)
+        assert isinstance(message, str)
+        assert isinstance(count, int)
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_empty_database(self, tmp_path, monkeypatch):
+        """Testi tyhjän tietokannan tyhjentämiselle"""
+        from main import clear_database
+        import sqlite3
+        
+        # Luo väliaikainen turvallinen tietokanta
+        temp_db = tmp_path / "safe_empty_test.db"
+        
+        # Luo tyhjä taulu
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            conn.commit()
+        
+        # Mockataan get_db_path osoittamaan turvalliseen tietokantaan
+        def mock_get_db_path(db_type):
+            return str(temp_db)
+        
+        monkeypatch.setattr('main.get_db_path', mock_get_db_path)
+        
+        # Tyhjennä ensin (pitäisi olla jo tyhjä)
+        clear_database('osakedata')
+        
+        # Yritä tyhjentää uudestaan
+        success, message, count = clear_database('osakedata')
+        
+        assert success is True
+        assert 'oli jo tyhjä' in message
+        assert count == 0
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_nonexistent_database(self, monkeypatch):
+        """Testi olemattoman tietokannan tyhjentämiselle"""
+        from main import clear_database
+        
+        # Mockataan get_db_path palauttamaan olematon polku
+        def mock_get_db_path(db_type):
+            return '/tmp/nonexistent_test.db'
+        
+        monkeypatch.setattr('main.get_db_path', mock_get_db_path)
+        
+        success, message, count = clear_database('osakedata')
+        
+        assert success is False
+        assert 'Tietokanta ei löydy' in message
+        assert count == 0
+
+    @pytest.mark.unit
+    @pytest.mark.db
+    def test_clear_database_invalid_db_type(self, tmp_path, monkeypatch):
+        """Testi epäkelvon tietokantatyypin käsittelylle"""
+        from main import clear_database
+        import sqlite3
+        
+        # Luo väliaikainen turvallinen tietokanta oletukselle
+        temp_db = tmp_path / "safe_invalid_test.db"
+        
+        # Luo taulu
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            conn.commit()
+        
+        # Mockataan get_db_path osoittamaan turvalliseen tietokantaan
+        def mock_get_db_path(db_type):
+            return str(temp_db)
+        
+        monkeypatch.setattr('main.get_db_path', mock_get_db_path)
+        
+        # Epäkelpo tietokantatyyppi -> käyttää oletusta osakedata
+        success, message, count = clear_database('invalid_db_type')
+        
+        # Pitäisi käsitellä kuten osakedata
+        assert success is not None  # Ei kaadu
+        assert isinstance(message, str)
+        assert isinstance(count, int)

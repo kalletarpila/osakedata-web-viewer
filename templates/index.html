@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Osakedata Viewer</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         html {
             scroll-behavior: smooth;
@@ -40,6 +41,38 @@
             border-radius: 0.25rem;
             margin: 0.1rem;
             display: inline-block;
+            transition: all 0.2s ease;
+        }
+        
+        .symbol-badge:hover {
+            background-color: #0056b3;
+            transform: scale(1.05);
+        }
+        
+        .autocomplete-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        #symbol-container {
+            min-height: 150px;
+        }
+        
+        .spinner-border-sm {
+            width: 1rem;
+            height: 1rem;
+        }
+        
+        /* Smooth scrolling for pagination */
+        .page-link {
+            transition: all 0.2s ease;
+        }
+        
+        /* Better responsive symbol layout */
+        @media (max-width: 768px) {
+            .symbol-badge {
+                font-size: 0.75rem;
+                padding: 0.1rem 0.3rem;
+            }
         }
     </style>
 </head>
@@ -68,14 +101,25 @@
                         
                         <div class="mb-3">
                             <label for="tickers" class="form-label">Symbolit tai niiden alut (pilkulla erotettuna):</label>
-                            <input type="text" class="form-control" id="tickers" name="tickers" 
-                                   placeholder="Esim: AAPL, GOOGL tai vain AA, GOO" 
-                                   value="{{ request.form.get('tickers', '') or request.form.get('delete_tickers', '') }}">
-                            <div class="form-text">Anna täysi symboli (AAPL) tai symbolin alku (AA). Hakee kaikki symbolit jotka alkavat annetulla tekstillä.</div>
+                            <div class="position-relative">
+                                <input type="text" class="form-control" id="tickers" name="tickers" 
+                                       placeholder="Esim: AAPL, GOOGL tai vain AA, GOO" 
+                                       value="{{ request.form.get('tickers', '') or request.form.get('delete_tickers', '') }}"
+                                       autocomplete="off">
+                                
+                                <!-- Autocomplete dropdown -->
+                                <div id="autocomplete-dropdown" class="position-absolute w-100 bg-white border border-top-0 rounded-bottom shadow-sm" 
+                                     style="display: none; z-index: 1000; max-height: 200px; overflow-y: auto;">
+                                </div>
+                            </div>
+                            <div class="form-text">
+                                Anna täysi symboli (AAPL) tai symbolin alku (AA). Hakee kaikki symbolit jotka alkavat annetulla tekstillä.
+                                <br><small class="text-primary">💡 Vinkki: Aloita kirjoittamaan nähdäksesi ehdotuksia</small>
+                            </div>
                         </div>
                         
                         <div class="row">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <form method="POST" action="/search" class="d-inline">
                                     <input type="hidden" name="tickers" id="search_tickers">
                                     <input type="hidden" name="db_type" id="search_db_type">
@@ -84,7 +128,7 @@
                                     </button>
                                 </form>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <form method="POST" action="/delete" class="d-inline" onsubmit="return confirmDeleteSimple()">
                                     <input type="hidden" name="delete_tickers" id="delete_tickers_hidden">
                                     <input type="hidden" name="db_type" id="delete_db_type">
@@ -102,21 +146,106 @@
                                     </div>
                                 </form>
                             </div>
+                            <div class="col-md-4">
+                                <form method="POST" action="/clear_database" onsubmit="return confirmClearDatabase()">
+                                    <input type="hidden" name="db_type" id="clear_db_type">
+                                    <input type="hidden" name="confirm_clear" id="confirm_clear_hidden" value="">
+                                    <input type="hidden" name="double_confirm" id="double_confirm_hidden" value="">
+                                    
+                                    <button type="submit" class="btn btn-warning w-100" style="background-color: #dc2626; border-color: #dc2626; color: white;">
+                                        💀 Tyhjennä kaikki
+                                    </button>
+                                    
+                                    <!-- Turvavarmistukset -->
+                                    <div class="mt-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="confirmClear">
+                                            <label class="form-check-label text-danger" for="confirmClear">
+                                                <strong>Ymmärrän riskit - poista KAIKKI</strong>
+                                            </label>
+                                        </div>
+                                        
+                                        <div class="mt-2">
+                                            <input type="text" class="form-control form-control-sm" 
+                                                   id="doubleConfirmText" 
+                                                   placeholder="Kirjoita: TYHJENNÄ"
+                                                   style="border-color: #dc2626;">
+                                            <small class="text-danger">Kirjoita 'TYHJENNÄ' vahvistaaksesi</small>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                {% if available_symbols %}
-                <div class="info-box">
-                    <h6>{{ db_label or 'Saatavilla olevat symbolit' }} - Symbolit tietokannassa:</h6>
-                    <div>
-                        {% for symbol in available_symbols %}
-                            <span class="symbol-badge">{{ symbol }}</span>
-                        {% endfor %}
+                <!-- Symboli selain paranneltu isoille tietomäärille -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">{{ db_label or 'Symbolit tietokannassa' }}</h6>
+                            <small class="text-muted" id="symbol-count">
+                                {% if available_symbols %}{{ available_symbols|length }} symbolia{% endif %}
+                            </small>
+                        </div>
+                        
+                        <!-- Symbolien haku ja suodatus -->
+                        <div class="mt-2">
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control" id="symbol-search" 
+                                       placeholder="Hae symbolia... (esim. AAPL, GOOGL)" 
+                                       autocomplete="off">
+                                <button class="btn btn-outline-secondary" type="button" id="clear-symbol-search">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <!-- Suodatimet -->
+                            <div class="mt-2">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn btn-outline-primary active" data-filter="all">Kaikki</button>
+                                    <button type="button" class="btn btn-outline-primary" data-filter="A-F">A-F</button>
+                                    <button type="button" class="btn btn-outline-primary" data-filter="G-M">G-M</button>
+                                    <button type="button" class="btn btn-outline-primary" data-filter="N-S">N-S</button>
+                                    <button type="button" class="btn btn-outline-primary" data-filter="T-Z">T-Z</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <small class="text-muted">Yhteensä {{ available_symbols|length }} symbolia</small>
+                    
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <!-- Ladataan symbolit dynaamisesti -->
+                        <div id="symbol-container">
+                            <div class="text-center p-3">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Ladataan...</span>
+                                </div>
+                                <div class="mt-2">Ladataan symboleja...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div id="symbol-pagination" class="mt-3" style="display: none;">
+                            <nav>
+                                <ul class="pagination pagination-sm justify-content-center">
+                                    <li class="page-item" id="prev-page">
+                                        <a class="page-link" href="#" aria-label="Edellinen">
+                                            <span aria-hidden="true">&laquo;</span>
+                                        </a>
+                                    </li>
+                                    <li class="page-item active" id="page-1">
+                                        <a class="page-link" href="#" data-page="1">1</a>
+                                    </li>
+                                    <li class="page-item" id="next-page">
+                                        <a class="page-link" href="#" aria-label="Seuraava">
+                                            <span aria-hidden="true">&raquo;</span>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </nav>
+                        </div>
+                    </div>
                 </div>
-                {% endif %}
 
                 {% if error %}
                 <div class="error-box">
@@ -178,39 +307,17 @@
             document.getElementById('delete_db_type').value = dbType;
         }
 
-        // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan
+                // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan
         function updateDatabase() {
             const dbType = document.getElementById('db_type').value;
             
-            // Lataa symbolit AJAX:lla
-            fetch(`/api/symbols?db_type=${dbType}`)
-                .then(response => response.json())
-                .then(symbols => {
-                    // Päivitä symbol-badget
-                    const container = document.querySelector('.info-box div');
-                    if (container) {
-                        container.innerHTML = '';
-                        symbols.forEach(symbol => {
-                            const badge = document.createElement('span');
-                            badge.className = 'symbol-badge';
-                            badge.textContent = symbol;
-                            badge.style.cursor = 'pointer';
-                            badge.addEventListener('click', function() {
-                                document.getElementById('tickers').value = this.textContent;
-                            });
-                            container.appendChild(badge);
-                        });
-                        
-                        // Päivitä määrä
-                        const countElement = container.parentNode.querySelector('.text-muted');
-                        if (countElement) {
-                            countElement.textContent = `Yhteensä ${symbols.length} symbolia`;
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Virhe symbolien lataamisessa:', error);
-                });
+            // Päivitä piilotetut kentät
+            document.getElementById('search_db_type').value = dbType;
+            document.getElementById('delete_db_type').value = dbType;
+            document.getElementById('clear_db_type').value = dbType;
+            
+            // Lataa uudet symbolit
+            loadSymbols();
         }        // Yksinkertainen varmistus checkboxilla
         function confirmDeleteSimple() {
             const tickers = document.getElementById('delete_tickers_hidden').value.trim();
@@ -233,15 +340,60 @@
             return confirm(`Poistetaan KAIKKI tiedot symboleille: ${tickers}\n\nJatketaanko?`);
         }
 
-        // Lisää click-toiminto symboli-badgeille
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.symbol-badge').forEach(badge => {
-                badge.style.cursor = 'pointer';
-                badge.addEventListener('click', function() {
-                    document.getElementById('tickers').value = this.textContent;
-                });
-            });
+        // VAARALLINEN TOIMINTO: Tietokannan tyhjentämisen vahvistus
+        function confirmClearDatabase() {
+            const checkbox = document.getElementById('confirmClear');
+            const confirmText = document.getElementById('doubleConfirmText').value.trim();
+            const dbType = document.getElementById('db_type').value;
+            
+            if (!checkbox.checked) {
+                alert('Rastita varmistusruutu vahvistaaksesi että ymmärrät riskit!');
+                checkbox.focus();
+                return false;
+            }
+            
+            if (confirmText !== 'TYHJENNÄ') {
+                alert('Kirjoita täsmälleen "TYHJENNÄ" vahvistaaksesi toiminnon!');
+                document.getElementById('doubleConfirmText').focus();
+                return false;
+            }
+            
+            // Viimeinen varoitus
+            const dbLabel = dbType === 'analysis' ? 'Analysis-tietokanta' : 'Osakedata-tietokanta';
+            const finalConfirm = confirm(
+                `⚠️ VIIMEINEN VAROITUS ⚠️\n\n` +
+                `Olet aikeissa TYHJENTÄÄ KOKONAAN:\n${dbLabel}\n\n` +
+                `Tämä poistaa KAIKKI tiedot PYSYVÄSTI!\n` +
+                `Toimintoa EI VOI PERUA!\n\n` +
+                `Oletko täysin varma että haluat jatkaa?`
+            );
+            
+            if (!finalConfirm) {
+                return false;
+            }
+            
+            // Aseta piilotetut arvot
+            document.getElementById('clear_db_type').value = dbType;
+            document.getElementById('confirm_clear_hidden').value = 'kyllä';
+            document.getElementById('double_confirm_hidden').value = confirmText;
+            
+            return true;
+        }
 
+        // Symbolien hallinta suurille tietomäärille
+        let allSymbols = [];
+        let filteredSymbols = [];
+        let currentPage = 1;
+        const symbolsPerPage = 100;
+        let currentFilter = 'all';
+        let symbolSearchTimeout = null;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSymbols();
+            setupAutocomplete();
+            setupSymbolSearch();
+            setupFilterButtons();
+            
             // Enter-näppäin hakee dataa
             document.getElementById('tickers').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
@@ -269,10 +421,283 @@
                 document.getElementById('tickers').value = foundSymbols.join(', ');
             };
             
-            const cardBody = document.querySelector('.card-body');
-            cardBody.appendChild(copyButton);
+            document.querySelector('.info-box')?.appendChild(copyButton);
             {% endif %}
         });
+        
+        // Lataa symbolit API:sta
+        function loadSymbols() {
+            const dbType = document.getElementById('db_type').value;
+            fetch(`/api/symbols?db_type=${dbType}`)
+                .then(response => response.json())
+                .then(symbols => {
+                    allSymbols = symbols.sort();
+                    filteredSymbols = [...allSymbols];
+                    currentPage = 1;
+                    updateSymbolCount();
+                    renderSymbols();
+                })
+                .catch(error => {
+                    console.error('Virhe symbolien lataamisessa:', error);
+                    document.getElementById('symbol-container').innerHTML = 
+                        '<div class="text-danger">Virhe symbolien lataamisessa</div>';
+                });
+        }
+        
+        // Päivitä symboli määrä
+        function updateSymbolCount() {
+            document.getElementById('symbol-count').textContent = 
+                `${filteredSymbols.length} / ${allSymbols.length} symbolia`;
+        }
+        
+        // Renderöi symbolit sivutettuna
+        function renderSymbols() {
+            const container = document.getElementById('symbol-container');
+            const startIndex = (currentPage - 1) * symbolsPerPage;
+            const endIndex = startIndex + symbolsPerPage;
+            const pageSymbols = filteredSymbols.slice(startIndex, endIndex);
+            
+            if (pageSymbols.length === 0) {
+                container.innerHTML = '<div class="text-muted p-3">Ei symboleita näytettävänä</div>';
+                document.getElementById('symbol-pagination').style.display = 'none';
+                return;
+            }
+            
+            let html = '<div class="row g-1">';
+            pageSymbols.forEach(symbol => {
+                html += `<div class="col-auto">
+                    <span class="symbol-badge badge bg-primary me-1 mb-1" 
+                          style="cursor: pointer;" 
+                          onclick="addSymbolToSearch('${symbol}')"
+                          title="Klikkaa lisätäksesi hakuun">${symbol}</span>
+                </div>`;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+            
+            // Näytä pagination jos tarvitaan
+            if (filteredSymbols.length > symbolsPerPage) {
+                renderPagination();
+                document.getElementById('symbol-pagination').style.display = 'block';
+            } else {
+                document.getElementById('symbol-pagination').style.display = 'none';
+            }
+        }
+        
+        // Renderöi sivutus
+        function renderPagination() {
+            const totalPages = Math.ceil(filteredSymbols.length / symbolsPerPage);
+            const pagination = document.getElementById('symbol-pagination');
+            
+            let html = '<nav><ul class="pagination pagination-sm justify-content-center">';
+            
+            // Edellinen sivu
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage - 1})" aria-label="Edellinen">
+                    <span aria-hidden="true">&laquo;</span>
+                </a>
+            </li>`;
+            
+            // Sivunumerot (näytä max 5 sivua)
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, startPage + 4);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                </li>`;
+            }
+            
+            // Seuraava sivu
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="changePage(${currentPage + 1})" aria-label="Seuraava">
+                    <span aria-hidden="true">&raquo;</span>
+                </a>
+            </li>`;
+            
+            html += '</ul></nav>';
+            pagination.innerHTML = html;
+        }
+        
+        // Vaihda sivu
+        function changePage(page) {
+            const totalPages = Math.ceil(filteredSymbols.length / symbolsPerPage);
+            if (page < 1 || page > totalPages) return;
+            
+            currentPage = page;
+            renderSymbols();
+            
+            // Scroll symbol containeriin
+            document.getElementById('symbol-container').scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'nearest' 
+            });
+        }
+        
+        // Lisää symboli hakuun
+        function addSymbolToSearch(symbol) {
+            const tickersInput = document.getElementById('tickers');
+            const currentValue = tickersInput.value.trim();
+            
+            if (currentValue === '') {
+                tickersInput.value = symbol;
+            } else {
+                // Tarkista ettei symboli ole jo listassa
+                const symbols = currentValue.split(',').map(s => s.trim());
+                if (!symbols.includes(symbol)) {
+                    tickersInput.value = currentValue + ', ' + symbol;
+                }
+            }
+            
+            // Focus input fieldiin
+            tickersInput.focus();
+        }
+        
+        // Symbolien haku
+        function setupSymbolSearch() {
+            const searchInput = document.getElementById('symbol-search');
+            const clearBtn = document.getElementById('clear-symbol-search');
+            
+            searchInput.addEventListener('input', function() {
+                clearTimeout(symbolSearchTimeout);
+                symbolSearchTimeout = setTimeout(() => {
+                    filterSymbols();
+                }, 300);
+            });
+            
+            clearBtn.addEventListener('click', function() {
+                searchInput.value = '';
+                filterSymbols();
+                searchInput.focus();
+            });
+        }
+        
+        // Suodata symbolit
+        function filterSymbols() {
+            const searchTerm = document.getElementById('symbol-search').value.trim().toLowerCase();
+            
+            let filtered = allSymbols;
+            
+            // Haku suodatus
+            if (searchTerm) {
+                filtered = filtered.filter(symbol => 
+                    symbol.toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            // Aakkossuodatus
+            if (currentFilter !== 'all') {
+                filtered = filtered.filter(symbol => {
+                    const firstChar = symbol.charAt(0).toUpperCase();
+                    switch (currentFilter) {
+                        case 'A-F': return firstChar >= 'A' && firstChar <= 'F';
+                        case 'G-M': return firstChar >= 'G' && firstChar <= 'M';
+                        case 'N-S': return firstChar >= 'N' && firstChar <= 'S';
+                        case 'T-Z': return firstChar >= 'T' && firstChar <= 'Z';
+                        default: return true;
+                    }
+                });
+            }
+            
+            filteredSymbols = filtered;
+            currentPage = 1;
+            updateSymbolCount();
+            renderSymbols();
+        }
+        
+        // Suodatus painikkeet
+        function setupFilterButtons() {
+            document.querySelectorAll('[data-filter]').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    // Poista active class kaikista
+                    document.querySelectorAll('[data-filter]').forEach(b => 
+                        b.classList.remove('active'));
+                    
+                    // Lisää active class valittuun
+                    this.classList.add('active');
+                    
+                    currentFilter = this.getAttribute('data-filter');
+                    filterSymbols();
+                });
+            });
+        }
+        
+        // Autocomplete setup
+        function setupAutocomplete() {
+            const tickersInput = document.getElementById('tickers');
+            const dropdown = document.getElementById('autocomplete-dropdown');
+            let autocompleteTimeout = null;
+            
+            tickersInput.addEventListener('input', function() {
+                clearTimeout(autocompleteTimeout);
+                autocompleteTimeout = setTimeout(() => {
+                    showAutocomplete();
+                }, 200);
+            });
+            
+            // Piilota dropdown kun klikataan muualle
+            document.addEventListener('click', function(e) {
+                if (!tickersInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+        
+        // Näytä autocomplete ehdotukset
+        function showAutocomplete() {
+            const input = document.getElementById('tickers');
+            const dropdown = document.getElementById('autocomplete-dropdown');
+            const value = input.value.trim();
+            
+            if (value.length < 1) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            // Ota viimeinen symboli pilkun jälkeen
+            const symbols = value.split(',');
+            const lastSymbol = symbols[symbols.length - 1].trim().toLowerCase();
+            
+            if (lastSymbol.length < 1) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            // Etsi matchaavat symbolit
+            const matches = allSymbols
+                .filter(symbol => symbol.toLowerCase().startsWith(lastSymbol))
+                .slice(0, 10); // Max 10 ehdotusta
+            
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            // Renderöi ehdotukset
+            let html = '';
+            matches.forEach(symbol => {
+                html += `<div class="p-2 border-bottom autocomplete-item" 
+                               style="cursor: pointer;" 
+                               onclick="selectAutocomplete('${symbol}')">
+                    <strong>${symbol}</strong>
+                </div>`;
+            });
+            
+            dropdown.innerHTML = html;
+            dropdown.style.display = 'block';
+        }
+        
+        // Valitse autocomplete ehdotus
+        function selectAutocomplete(symbol) {
+            const input = document.getElementById('tickers');
+            const symbols = input.value.split(',');
+            symbols[symbols.length - 1] = ' ' + symbol;
+            input.value = symbols.join(',');
+            
+            document.getElementById('autocomplete-dropdown').style.display = 'none';
+            input.focus();
+        }
     </script>
 </body>
 </html>

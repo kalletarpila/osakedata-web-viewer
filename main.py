@@ -106,22 +106,49 @@ def get_stock_data(search_terms, db_type='osakedata'):
         return pd.DataFrame(), f"Virhe tietokannasta hakiessa: {str(e)}", []
 
 def get_available_symbols(db_type='osakedata'):
-    """Hae kaikki saatavilla olevat symbolit/tickerit tietokannasta."""
+    """
+    Hae kaikki saatavilla olevat symbolit/tickerit tietokannasta.
+    Optimoitu suurille tietomäärille (10,000+ symbolia).
+    """
     db_path = get_db_path(db_type)
     if not os.path.exists(db_path):
         return []
     
     try:
         with sqlite3.connect(db_path) as conn:
+            # Optimoi connection suurille kyselyille
+            conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+            conn.execute("PRAGMA temp_store = MEMORY")
+            
             cursor = conn.cursor()
+            
             if db_type == 'analysis':
-                cursor.execute("SELECT DISTINCT ticker FROM analysis_findings ORDER BY ticker")
+                # Käytä indeksiä jos se on olemassa
+                cursor.execute("""
+                    SELECT DISTINCT ticker 
+                    FROM analysis_findings 
+                    WHERE ticker IS NOT NULL AND ticker != ''
+                    ORDER BY ticker COLLATE NOCASE
+                """)
             else:
-                cursor.execute("SELECT DISTINCT osake FROM osakedata ORDER BY osake")
+                # Käytä indeksiä jos se on olemassa  
+                cursor.execute("""
+                    SELECT DISTINCT osake 
+                    FROM osakedata 
+                    WHERE osake IS NOT NULL AND osake != ''
+                    ORDER BY osake COLLATE NOCASE
+                """)
+            
             symbols = [row[0] for row in cursor.fetchall()]
+            
+        # Poista mahdolliset tyhjät arvot ja duplikaatit (varmistuksena)
+        symbols = list(filter(None, symbols))
+        
+        app.logger.info(f"Loaded {len(symbols)} symbols from {db_type} database")
         return symbols
+        
     except Exception as e:
-        print(f"Virhe symbolien hakemisessa: {e}")
+        app.logger.error(f"Virhe symbolien hakemisessa {db_type}: {e}")
         return []
 
 def delete_stock_data(symbols_to_delete, db_type='osakedata'):
@@ -167,6 +194,64 @@ def delete_stock_data(symbols_to_delete, db_type='osakedata'):
             
     except Exception as e:
         return False, f"Virhe tietojen poistossa: {str(e)}", 0
+
+def clear_database(db_type='osakedata'):
+    """
+    Tyhjentää koko tietokannan - VAARALLINEN TOIMINTO!
+    
+    Args:
+        db_type (str): Tietokannan tyyppi ('osakedata' tai 'analysis' tai 'both')
+    
+    Returns:
+        tuple: (onnistui (bool), viesti (str), poistettujen_rivien_määrä (int))
+    """
+    if db_type == 'both':
+        # Tyhjennä molemmat tietokannat
+        success1, msg1, count1 = clear_database('osakedata')
+        success2, msg2, count2 = clear_database('analysis') 
+        
+        if success1 and success2:
+            return True, f"Molemmat tietokannat tyhjennetty. {msg1} {msg2}", count1 + count2
+        else:
+            return False, f"Virhe tietokantoja tyhjentäessä: {msg1} {msg2}", count1 + count2
+    
+    db_path = get_db_path(db_type)
+    if not os.path.exists(db_path):
+        return False, f"Tietokanta ei löydy: {db_path}", 0
+    
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Määrittele taulun nimi tietokantatyypin mukaan
+            if db_type == 'analysis':
+                table_name = 'analysis_findings'
+            else:
+                table_name = 'osakedata'
+            
+            # Laske rivien määrä ennen poistoa
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            total_rows = cursor.fetchone()[0]
+            
+            if total_rows == 0:
+                return True, f"Tietokanta {db_type} oli jo tyhjä", 0
+            
+            # Tyhjennä taulu
+            cursor.execute(f"DELETE FROM {table_name}")
+            
+            # Nollaa autoincrement sekvenssi jos sqlite_sequence taulu on olemassa
+            try:
+                cursor.execute(f"DELETE FROM sqlite_sequence WHERE name='{table_name}'")
+            except sqlite3.OperationalError:
+                # sqlite_sequence ei ole olemassa - ei haittaa
+                pass
+            
+            conn.commit()
+            
+            return True, f"Tietokanta {db_type} tyhjennetty ({total_rows} riviä poistettu)", total_rows
+            
+    except Exception as e:
+        return False, f"Virhe tietokannan tyhjentämisessä: {str(e)}", 0
 
 @app.route('/')
 def index():
@@ -290,12 +375,111 @@ def delete_stocks():
                              current_db=db_type,
                              db_label=get_db_label(db_type))
 
+@app.route('/clear_database', methods=['POST'])
+def clear_database_route():
+    """Tyhjennä valittu tietokanta - VAARALLINEN TOIMINTO!"""
+    db_type = request.form.get('db_type', 'osakedata')
+    confirm = request.form.get('confirm_clear', '').strip().lower()
+    double_confirm = request.form.get('double_confirm', '').strip()
+    
+    # Tarkista vahvistukset
+    if confirm not in ['kyllä', 'kylla', 'yes']:
+        return render_template('index.html', 
+                             error="Tietokannan tyhjentäminen vaatii vahvistuksen",
+                             available_symbols=get_available_symbols(db_type),
+                             current_db=db_type,
+                             db_label=get_db_label(db_type))
+    
+    # Tuplavirus - käyttäjän täytyy kirjoittaa "TYHJENNÄ" 
+    if double_confirm != 'TYHJENNÄ':
+        return render_template('index.html', 
+                             error="Turvallisuussyistä sinun täytyy kirjoittaa 'TYHJENNÄ' vahvistaaksesi toiminnon",
+                             available_symbols=get_available_symbols(db_type),
+                             current_db=db_type,
+                             db_label=get_db_label(db_type))
+    
+    # Suorita tietokannan tyhjentäminen
+    success, message, deleted_count = clear_database(db_type)
+    
+    if success:
+        return render_template('index.html', 
+                             success=message,
+                             available_symbols=get_available_symbols(db_type),
+                             current_db=db_type,
+                             db_label=get_db_label(db_type))
+    else:
+        return render_template('index.html', 
+                             error=message,
+                             available_symbols=get_available_symbols(db_type),
+                             current_db=db_type,
+                             db_label=get_db_label(db_type))
+
 @app.route('/api/symbols')
 def api_symbols():
-    """API-endpoint saatavilla olevien symbolien hakemiseen."""
+    """API-endpoint saatavilla olevien symbolien hakemiseen - optimoitu suurille tietomäärille."""
     db_type = request.args.get('db_type', 'osakedata')
-    symbols = get_available_symbols(db_type)
-    return jsonify(symbols)
+    page = request.args.get('page', type=int)
+    limit = request.args.get('limit', type=int)
+    search = request.args.get('search', '').strip()
+    
+    try:
+        symbols = get_available_symbols(db_type)
+        
+        # Suodata hakutermillä jos annettu
+        if search:
+            symbols = [s for s in symbols if search.lower() in s.lower()]
+        
+        total_count = len(symbols)
+        
+        # Pagination jos pyydetty
+        if page is not None and limit is not None:
+            start = (page - 1) * limit
+            end = start + limit
+            symbols = symbols[start:end]
+            
+            return jsonify({
+                'symbols': symbols,
+                'total': total_count,
+                'page': page,
+                'limit': limit,
+                'total_pages': (total_count + limit - 1) // limit
+            })
+        
+        # Palauta kaikki symbolit jos ei paginationia
+        return jsonify(symbols)
+        
+    except Exception as e:
+        app.logger.error(f"Error in api_symbols: {e}")
+        return jsonify({'error': 'Virhe symbolien lataamisessa'}), 500
+
+@app.route('/api/symbols/search')
+def api_symbols_search():
+    """Nopea symbolien haku autocomplete-toiminnallisuudelle."""
+    db_type = request.args.get('db_type', 'osakedata')
+    query = request.args.get('q', '').strip().upper()
+    limit = request.args.get('limit', 10, type=int)
+    
+    if not query or len(query) < 1:
+        return jsonify([])
+    
+    try:
+        symbols = get_available_symbols(db_type)
+        
+        # Etsi symbolit jotka alkavat hakutermillä (nopein)
+        matches = [s for s in symbols if s.startswith(query)]
+        
+        # Jos ei löydy, etsi symbolit jotka sisältävät hakutermin
+        if not matches:
+            matches = [s for s in symbols if query in s]
+        
+        # Rajoita tulokset
+        matches = matches[:limit]
+        
+        return jsonify(matches)
+        
+    except Exception as e:
+        app.logger.error(f"Error in api_symbols_search: {e}")
+        return jsonify({'error': 'Virhe symbolien haussa'}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5001)
