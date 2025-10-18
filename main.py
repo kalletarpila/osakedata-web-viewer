@@ -52,7 +52,7 @@ def get_stock_data(search_terms, db_type='osakedata'):
     try:
         # Määrittele kysely tietokantatyypin mukaan
         if db_type == 'analysis':
-            # Analysis-tietokanta: ticker, date, pattern
+            # Analysis-tietokanta: id, ticker, date, candle
             conditions = []
             params = []
             
@@ -91,10 +91,10 @@ def get_stock_data(search_terms, db_type='osakedata'):
         
         # Hae löytyneet uniikit symbolit/tickerit
         if db_type == 'analysis':
-            symbol_col = 'ticker' if 'ticker' in df.columns else 'osake'
+            symbol_col = 'ticker'
             found_symbols = df[symbol_col].unique().tolist() if not df.empty else []
         else:
-            symbol_col = 'osake' if 'osake' in df.columns else 'ticker'
+            symbol_col = 'osake'
             found_symbols = df[symbol_col].unique().tolist() if not df.empty else []
         
         if df.empty:
@@ -128,7 +128,7 @@ def get_available_symbols(db_type='osakedata'):
                     SELECT DISTINCT ticker 
                     FROM analysis_findings 
                     WHERE ticker IS NOT NULL AND ticker != ''
-                    ORDER BY ticker COLLATE NOCASE
+                    ORDER BY ticker
                 """)
             else:
                 # Käytä indeksiä jos se on olemassa  

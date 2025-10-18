@@ -95,9 +95,9 @@ class TestSearchRoute:
         
         # Should have analysis columns
         headers = [th.get_text().strip() for th in table.find_all('th')]
-        expected_columns = ['ticker', 'date', 'pattern']
-        for col in expected_columns:
-            assert any(col in header.lower() for header in headers)
+        expected_columns = ['ticker', 'date', 'candle']
+        for column in expected_columns:
+            assert any(column in header.lower() for header in headers)
     
     @pytest.mark.integration
     @pytest.mark.web

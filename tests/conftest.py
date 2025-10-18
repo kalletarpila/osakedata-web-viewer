@@ -74,8 +74,7 @@ class DatabaseFixtures:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ticker TEXT,
                 date TEXT,
-                pattern TEXT,
-                UNIQUE(ticker, date, pattern)
+                candle TEXT
             )
         ''')
         
@@ -98,7 +97,7 @@ class DatabaseFixtures:
         ]
         
         cursor.executemany('''
-            INSERT OR IGNORE INTO analysis_findings (ticker, date, pattern)
+            INSERT INTO analysis_findings (ticker, date, candle)
             VALUES (?, ?, ?)
         ''', sample_data)
         
@@ -130,8 +129,7 @@ class DatabaseFixtures:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT,
                     date TEXT,
-                    pattern TEXT,
-                    UNIQUE(ticker, date, pattern)
+                    candle TEXT
                 )
             ''')
         

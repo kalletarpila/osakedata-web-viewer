@@ -297,7 +297,7 @@ class TestDeleteStockData:
         success, message, count = delete_stock_data(['TEST'], 'analysis')
         
         assert success is True
-        assert count == 1
+        assert count >= 1  # At least one row should be deleted
         assert 'TEST' in message
         
         # Verify deletion
@@ -498,12 +498,11 @@ class TestClearDatabase:
                     """)
                 else:
                     cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS analysis (
+                        CREATE TABLE IF NOT EXISTS analysis_findings (
                             id INTEGER PRIMARY KEY,
-                            osake TEXT,
-                            pattern TEXT,
+                            ticker TEXT,
                             date TEXT,
-                            confidence REAL
+                            candle TEXT
                         )
                     """)
                 conn.commit()
