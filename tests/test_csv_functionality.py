@@ -193,8 +193,19 @@ class TestCSVFlaskRoutes:
         csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
 ^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000"""
         
-        with patch("os.path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=csv_content)):
+        # Tallennetaan alkuperäinen open-funktio rekursion välttämiseksi
+        original_open = open
+        
+        with patch("main.os.path.exists", return_value=True):
+            # Mockataan vain CSV-tiedoston lukeminen, ei kaikkia open-kutsuja
+            def side_effect(file_path, *args, **kwargs):
+                if '/home/kalle/projects/rawcandle/data/osakedata.csv' in str(file_path):
+                    return mock_open(read_data=csv_content)()
+                else:
+                    # Käytä alkuperäistä open-funktiota muille tiedostoille
+                    return original_open(file_path, *args, **kwargs)
+            
+            with patch("builtins.open", side_effect=side_effect):
                 response = client.post('/fetch_csv', data={'tickers': ''})
                 
         assert response.status_code == 200
@@ -222,8 +233,17 @@ class TestCSVFlaskRoutes:
 ^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000
 AAPL,2023-07-03,150.00,155.00,149.00,152.00,50000000"""
         
-        with patch("os.path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=csv_content)):
+        # Tallennetaan alkuperäinen open-funktio rekursion välttämiseksi
+        original_open = open
+        
+        with patch("main.os.path.exists", return_value=True):
+            def side_effect(file_path, *args, **kwargs):
+                if '/home/kalle/projects/rawcandle/data/osakedata.csv' in str(file_path):
+                    return mock_open(read_data=csv_content)()
+                else:
+                    return original_open(file_path, *args, **kwargs)
+            
+            with patch("builtins.open", side_effect=side_effect):
                 response = client.post('/fetch_csv', data={'tickers': '^IXIC,AAPL'})
                 
         assert response.status_code == 200
@@ -274,8 +294,17 @@ class TestCSVFormHandling:
         """Testi: Välilyöntien käsittely lomakkeessa."""
         csv_content = "^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000"
         
-        with patch("os.path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=csv_content)):
+        # Tallennetaan alkuperäinen open-funktio rekursion välttämiseksi
+        original_open = open
+        
+        with patch("main.os.path.exists", return_value=True):
+            def side_effect(file_path, *args, **kwargs):
+                if '/home/kalle/projects/rawcandle/data/osakedata.csv' in str(file_path):
+                    return mock_open(read_data=csv_content)()
+                else:
+                    return original_open(file_path, *args, **kwargs)
+            
+            with patch("builtins.open", side_effect=side_effect):
                 response = client.post('/fetch_csv', data={'tickers': '  ^IXIC  '})
                 
         assert response.status_code == 200
@@ -289,8 +318,17 @@ class TestCSVFormHandling:
         csv_content = """^IXIC,2023-07-03,13000.00,13100.00,12900.00,13050.00,1000000
 ^GSPC,2023-07-03,4400.00,4450.00,4390.00,4420.00,2000000"""
 
-        with patch("os.path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=csv_content)):
+        # Tallennetaan alkuperäinen open-funktio rekursion välttämiseksi
+        original_open = open
+        
+        with patch("main.os.path.exists", return_value=True):
+            def side_effect(file_path, *args, **kwargs):
+                if '/home/kalle/projects/rawcandle/data/osakedata.csv' in str(file_path):
+                    return mock_open(read_data=csv_content)()
+                else:
+                    return original_open(file_path, *args, **kwargs)
+            
+            with patch("builtins.open", side_effect=side_effect):
                 response = client.post('/fetch_csv', data={'tickers': '^IXIC,^GSPC'})
             
         assert response.status_code == 200
@@ -303,8 +341,17 @@ class TestCSVFormHandling:
         """Testi: Ei erota isoja ja pieniä kirjaimia."""
         csv_content = "AAPL,2023-07-03,150.00,155.00,149.00,152.00,50000000"
         
-        with patch("os.path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=csv_content)):
+        # Tallennetaan alkuperäinen open-funktio rekursion välttämiseksi
+        original_open = open
+        
+        with patch("main.os.path.exists", return_value=True):
+            def side_effect(file_path, *args, **kwargs):
+                if '/home/kalle/projects/rawcandle/data/osakedata.csv' in str(file_path):
+                    return mock_open(read_data=csv_content)()
+                else:
+                    return original_open(file_path, *args, **kwargs)
+            
+            with patch("builtins.open", side_effect=side_effect):
                 response = client.post('/fetch_csv', data={'tickers': 'aapl'})
                 
         assert response.status_code == 200
