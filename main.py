@@ -513,26 +513,10 @@ def fetch_tickers_from_file(task_id=None):
                     if task_id and task_id in progress_store:
                         progress_store[task_id]['error_count'] += 1
                 
-                # Dynaaminen delay-strategia tikkerimäärän mukaan
-                # Optimoi tehokkuus vs. API-kuormitus:
-                # - Pienet haut (≤100): 300ms = turvallinen ja nopea
-                # - Keskikokoiset (≤500): 200ms = hyvä balanssi  
-                # - Suuret (≤2000): 150ms = tehokas massakäyttöön
-                # - Massiiviset (>2000): 100ms = maksimitehokkuus
+                # Kiinteä 0,6 sekunnin viive tikkereiden välillä
+                # Tasapainoinen API-kuormitus ja kohtuullinen nopeus
                 if i < len(all_tickers):  # Ei taukoa viimeisen jälkeen
-                    total_tickers = len(all_tickers)
-                    
-                    # Perusdelay skaalautuu tikkerimäärän mukaan
-                    if total_tickers <= 100:
-                        base_delay = 0.3    # 300ms pienille hauille (< 30s kokonaisaika)
-                    elif total_tickers <= 500:
-                        base_delay = 0.2    # 200ms keskikokoisille (< 1.7min)
-                    elif total_tickers <= 2000:
-                        base_delay = 0.15   # 150ms suurille (< 5min)
-                    else:
-                        base_delay = 0.1    # 100ms massiivisille hauille (> 2000)
-                    
-                    time.sleep(base_delay)
+                    time.sleep(0.6)  # 600ms kiinteä viive
                 
                 # Pidempi tauko joka 200. osakkeen jälkeen (vähemmän häirintää)
                 if i % 200 == 0 and i < len(all_tickers):

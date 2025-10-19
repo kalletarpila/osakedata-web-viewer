@@ -371,7 +371,7 @@ class TestFetchTickersFromFile:
     @pytest.mark.slow
     @pytest.mark.integration
     def test_fetch_tickers_from_file_rate_limiting_delays(self, monkeypatch, empty_osakedata_db):
-        """Test that dynamic rate limiting delays are applied correctly."""
+        """Test that fixed 0.6 second rate limiting delays are applied correctly."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': empty_osakedata_db})
         
         ticker_content = "DELAY1\nDELAY2\nDELAY3\n"
@@ -390,28 +390,23 @@ class TestFetchTickersFromFile:
                     with patch('time.sleep', side_effect=mock_sleep):
                         success, message, stats = fetch_tickers_from_file()
                         
-                        # Should have 2 sleep calls (300ms each for small batch ≤100 tickers)
+                        # Should have 2 sleep calls (600ms each for fixed delay)
                         assert len(sleep_calls) == 2
-                        assert all(delay == 0.3 for delay in sleep_calls), f"Expected 0.3s delays, got: {sleep_calls}"
+                        assert all(delay == 0.6 for delay in sleep_calls), f"Expected 0.6s delays, got: {sleep_calls}"
 
     @pytest.mark.unit  
     @pytest.mark.yfinance
-    def test_fetch_tickers_from_file_dynamic_delay_scaling(self, monkeypatch, empty_osakedata_db):
-        """Test that delay scaling works correctly for different ticker counts."""
+    def test_fetch_tickers_from_file_fixed_delay_timing(self, monkeypatch, empty_osakedata_db):
+        """Test that fixed 0.6 second delays work correctly for different ticker counts."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': empty_osakedata_db})
         
         mock_ticker = MagicMock()
         mock_ticker.history.return_value = pd.DataFrame()  # Empty to speed up test
         
-        # Test different ticker counts and expected delays
-        test_cases = [
-            (50, 0.3),    # Small batch: 300ms
-            (300, 0.2),   # Medium batch: 200ms  
-            (1000, 0.15), # Large batch: 150ms
-            (5000, 0.1),  # Massive batch: 100ms
-        ]
+        # Test different ticker counts with fixed 0.6s delay
+        test_cases = [50, 100, 500, 1000, 2000]
         
-        for ticker_count, expected_delay in test_cases:
+        for ticker_count in test_cases:
             sleep_calls = []
             
             def mock_sleep(seconds):
@@ -438,8 +433,13 @@ class TestFetchTickersFromFile:
                             pause_delays = [delay for delay in sleep_calls if delay == 5]
                             
                             assert len(base_delays) == expected_base_delays, f"Expected {expected_base_delays} base delays, got {len(base_delays)}"
+                            
+                            # All base delays should be 0.6 seconds (fixed delay)
+                            assert all(delay == 0.6 for delay in base_delays), f"Expected 0.6s delays, got: {base_delays}"
+                            
+                            # All pause delays should be 5 seconds
+                            assert all(delay == 5 for delay in pause_delays), f"Expected 5s pause delays, got: {pause_delays}"
                             assert len(pause_delays) == expected_pause_delays, f"Expected {expected_pause_delays} pause delays, got {len(pause_delays)}"
-                            assert all(delay == expected_delay for delay in base_delays), f"Expected {expected_delay}s base delays, got: {base_delays}"
 
 
 class TestFetchTickersRoute:
