@@ -22,6 +22,25 @@
         #stockTable {
             font-size: 0.9em;
         }
+        
+        /* Varmista että taulukon otsikot ja data ovat linjassa */
+        #stockTable th,
+        #stockTable td {
+            text-align: left;
+            vertical-align: middle;
+            padding: 0.5rem;
+        }
+        
+        /* Numeroiden tasaus oikealle */
+        #stockTable td:nth-child(n+3):nth-child(-n+7) {
+            text-align: right;
+        }
+        
+        /* Symbolien tasaus vasemmalle */
+        #stockTable td:first-child,
+        #stockTable th:first-child {
+            text-align: left;
+        }
         .info-box {
             background-color: #f8f9fa;
             border-left: 4px solid #007bff;
