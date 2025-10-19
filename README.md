@@ -18,6 +18,11 @@ Flask web application for viewing stock data from multiple SQLite databases.
   - **Individual Tickers**: Import specific symbols (e.g., "AAPL,MSFT")
   - **Mass Import**: Import ALL symbols from CSV by leaving ticker field empty
   - **YFinance Integration**: Fetch real-time data from Yahoo Finance API
+- **Ticker File Processing**: Batch process tickers from external file with:
+  - **Automated Processing**: Process all tickers from `tickers.txt` file
+  - **Rate Limiting**: 1-second delays + 10-second pauses every 100 stocks
+  - **Progress Tracking**: Real-time progress bar with detailed statistics
+  - **Error Handling**: Comprehensive error reporting and recovery
 
 ## Databases
 
@@ -71,7 +76,7 @@ The application starts at: `http://localhost:5000`
 3. **Quick Access**: Click on available symbol badges to quickly search
 4. **Delete Data**: Use the delete button with confirmation for data removal
 5. **Navigation**: Smooth scrolling to results table
-6. **Import Data**: Use CSV or YFinance tabs to import new stock data
+6. **Import Data**: Use CSV, YFinance, or Ticker File buttons to import new stock data
 
 ### Data Import Features
 
@@ -86,6 +91,15 @@ The application starts at: `http://localhost:5000`
 - **Real-time Data**: Fetch current stock data from Yahoo Finance API
 - **Multiple Symbols**: Support for comma-separated ticker lists
 - **Automatic Validation**: Validates ticker symbols before import
+
+#### Ticker File Processing
+- **Batch Import**: Automatically process all tickers from `/home/kalle/projects/rawcandle/data/tickers.txt`
+- **Rate Limiting**: 1-second delays between tickers + 10-second pauses every 100 stocks
+- **Progress Tracking**: Real-time progress bar showing processing status
+- **Comprehensive Statistics**: Displays processed/success/error counts
+- **Background Processing**: Non-blocking UI with visual feedback
+- **Error Recovery**: Continues processing even if individual tickers fail
+- **Time Period**: Fetches data from July 1, 2023 to September 30, 2025
 
 ### Palvelimen pysäytys
 
@@ -126,6 +140,12 @@ Sovellus hakee dataa tietokannasta: `/home/kalle/projects/rawcandle/data/osakeda
 - **Massa-ajo**: Jätä ticker-kenttä tyhjäksi → Importtaa kaikki CSV:n symbolit
 - Tulos näyttää "MASSA-AJO" viestin tyhjällä kentällä
 
+**Ticker File Processing:**
+- **📋 Hae Tickerit -nappi**: Prosessoi automaattisesti kaikki `/home/kalle/projects/rawcandle/data/tickers.txt` tiedoston tickerit
+- **Progressi**: Reaaliaikainen edistymispalkki prosessoinnin seuranta
+- **Tilastot**: Näyttää käsitellyt/onnistuneet/epäonnistuneet määrät
+- **Virheensietokyky**: Jatkaa prosessointia vaikka yksittäiset tickerit epäonnistuisivat
+
 **Huom:** Isot/pienet kirjaimet muunnetaan automaattisesti isoiksi
 
 ### Datan poistaminen
@@ -161,6 +181,7 @@ Sovellus lukee `osakedata`-taulua, jossa on seuraavat sarakkeet:
 - `GET /api/symbols` - JSON-lista saatavilla olevista symboleista
 - `POST /fetch_csv` - CSV-datan tuonti (yksittäiset symbolit tai massa-ajo)
 - `POST /fetch_yfinance` - YFinance-datan tuonti reaaliaikaisesta API:sta
+- `POST /fetch_tickers` - Ticker-tiedoston käsittely (JSON API)
 
 ## Kehitys
 

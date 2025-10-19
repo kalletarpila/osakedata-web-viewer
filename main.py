@@ -373,6 +373,171 @@ def fetch_yfinance_data(tickers):
         return False, f"Tietokantavirhe: {str(e)}", 0
 
 
+def fetch_tickers_from_file():
+    """
+    Hae tickers.txt tiedostosta kaikki tickerit ja lataa niiden YFinance data.
+    Tiedosto: /home/kalle/projects/rawcandle/data/tickers.txt
+    Hakujakso: 1.7.2023 - 30.9.2025
+    Palauttaa (success, message, saved_count)
+    """
+    import time
+    import os
+    
+    tickers_file = "/home/kalle/projects/rawcandle/data/tickers.txt"
+    
+    # Tarkista että tiedosto on olemassa
+    if not os.path.exists(tickers_file):
+        return False, f"Tickers-tiedostoa ei löytynyt: {tickers_file}", {'processed': 0, 'success_count': 0, 'error_count': 0, 'total_saved': 0}
+    
+    # Lue tickerit tiedostosta
+    try:
+        with open(tickers_file, 'r', encoding='utf-8') as f:
+            all_tickers = [line.strip().upper() for line in f if line.strip()]
+    except Exception as e:
+        return False, f"Virhe tickers-tiedoston lukemisessa: {str(e)}", {'processed': 0, 'success_count': 0, 'error_count': 0, 'total_saved': 0}
+    
+    if not all_tickers:
+        return False, "Tickers-tiedosto on tyhjä", {'processed': 0, 'success_count': 0, 'error_count': 0, 'total_saved': 0}
+    
+    print(f"📁 Luettu {len(all_tickers)} tickeriä tiedostosta")
+    
+    total_saved = 0
+    failed_tickers = []
+    processed_count = 0
+    
+    # Hakujakso: sama kuin fetch_yfinance_data
+    start_date = "2023-07-01"
+    end_date = "2025-09-30"
+    
+    db_path = get_db_path('osakedata')
+    
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Varmista että taulu on olemassa
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS osakedata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    osake TEXT,
+                    pvm TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER
+                )
+            """)
+            
+            # Varmista UNIQUE-indeksi duplikaattien estämiseksi
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake, pvm)")
+            
+            for i, ticker in enumerate(all_tickers, 1):
+                processed_count = i
+                print(f"🔄 Haetaan {ticker} ({i}/{len(all_tickers)})")
+                
+                try:
+                    # Hae data YFinancesta
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(start=start_date, end=end_date)
+                    
+                    # Tarkista että dataa löytyi
+                    if hist.empty:
+                        failed_tickers.append(f"{ticker} (ei dataa)")
+                        print(f"   ❌ {ticker}: Ei dataa")
+                    else:
+                        # Käsittele data
+                        hist.reset_index(inplace=True)
+                        
+                        # Tallenna rivit tietokantaan
+                        ticker_saved = 0
+                        for _, row in hist.iterrows():
+                            # Ohita rivit joissa on NaN-arvoja
+                            if pd.isna([row['Open'], row['High'], row['Low'], row['Close'], row['Volume']]).any():
+                                continue
+                            
+                            date_str = row['Date'].strftime('%Y-%m-%d')
+                            
+                            # Tarkista onko päivämäärä jo olemassa
+                            cursor.execute(
+                                "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
+                                (ticker, date_str)
+                            )
+                            
+                            if cursor.fetchone()[0] == 0:  # Ei ole olemassa
+                                cursor.execute("""
+                                    INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    ticker,
+                                    date_str,
+                                    float(row['Open']),
+                                    float(row['High']),
+                                    float(row['Low']),
+                                    float(row['Close']),
+                                    int(row['Volume'])
+                                ))
+                                ticker_saved += 1
+                        
+                        if ticker_saved > 0:
+                            total_saved += ticker_saved
+                            print(f"   ✅ {ticker}: {ticker_saved} riviä tallennettu")
+                        else:
+                            failed_tickers.append(f"{ticker} (kaikki päivät jo olemassa)")
+                            print(f"   ⚠️ {ticker}: Kaikki päivät jo olemassa")
+                            
+                except Exception as e:
+                    failed_tickers.append(f"{ticker} (virhe: {str(e)})")
+                    print(f"   ❌ {ticker}: Virhe - {str(e)}")
+                
+                # 1 sekunnin tauko jokaisen osakkeen jälkeen
+                if i < len(all_tickers):  # Ei taukoa viimeisen jälkeen
+                    time.sleep(1)
+                
+                # 10 sekunnin tauko joka 100. osakkeen jälkeen
+                if i % 100 == 0 and i < len(all_tickers):
+                    print(f"⏸️ 10s tauko ({i}/100 osaketta haettu)")
+                    time.sleep(10)
+                
+                # Commitoi muutokset säännöllisesti
+                if i % 10 == 0:
+                    conn.commit()
+            
+            # Lopullinen commit
+            conn.commit()
+            
+            # Muodosta vastausviesti ja statistiikat
+            success_count = processed_count - len(failed_tickers)
+            success_msg = f"Käsitelty {processed_count}/{len(all_tickers)} tickeriä. Tallennettu {total_saved} riviä."
+            
+            if failed_tickers and len(failed_tickers) < 20:  # Näytä epäonnistumiset jos ei liian monta
+                success_msg += f" Epäonnistui: {', '.join(failed_tickers[:10])}"
+                if len(failed_tickers) > 10:
+                    success_msg += f" (+{len(failed_tickers)-10} muuta)"
+            elif failed_tickers:
+                success_msg += f" Epäonnistui: {len(failed_tickers)} tickeriä"
+            
+            stats = {
+                'processed': processed_count,
+                'success_count': success_count,
+                'error_count': len(failed_tickers),
+                'total_saved': total_saved
+            }
+            
+            return True, success_msg, stats
+            
+    except Exception as e:
+        error_msg = f"Tietokantavirhe tickeritiedoston käsittelyssä: {str(e)}"
+        print(f"❌ {error_msg}")
+        stats = {
+            'processed': processed_count,
+            'success_count': 0,
+            'error_count': processed_count,
+            'total_saved': total_saved
+        }
+        return False, error_msg, stats
+
+
 def fetch_csv_data(tickers=None):
     """
     Lataa osaketiedot CSV-tiedostosta /home/kalle/projects/rawcandle/data/osakedata.csv
@@ -690,6 +855,54 @@ def fetch_yfinance_route():
                              available_symbols=get_available_symbols('osakedata'),
                              current_db='osakedata',
                              db_label=get_db_label('osakedata'))
+
+
+@app.route('/fetch_tickers', methods=['POST'])
+def fetch_tickers_route():
+    """Hae OHLCV-data Yahoo Financesta tickers.txt tiedostosta."""
+    
+    # Tarkista että tiedosto on olemassa
+    import os
+    tickers_file = "/home/kalle/projects/rawcandle/data/tickers.txt"
+    
+    if not os.path.exists(tickers_file):
+        return jsonify({
+            'success': False,
+            'message': f"Tickers-tiedostoa ei löytynyt: {tickers_file}"
+        })
+    
+    # Lue tiedosto ja laske tickerien määrä
+    try:
+        with open(tickers_file, 'r', encoding='utf-8') as f:
+            ticker_count = len([line.strip() for line in f if line.strip()])
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f"Virhe tickers-tiedoston lukemisessa: {str(e)}"
+        })
+    
+    if ticker_count == 0:
+        return jsonify({
+            'success': False,
+            'message': "Tickers-tiedosto on tyhjä"
+        })
+    
+    # Hae data tiedostosta
+    success, message, stats = fetch_tickers_from_file()
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': message,
+            'processed': stats.get('processed', 0),
+            'success_count': stats.get('success_count', 0),
+            'error_count': stats.get('error_count', 0)
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': message
+        })
 
 
 @app.route('/fetch_csv', methods=['POST'])
