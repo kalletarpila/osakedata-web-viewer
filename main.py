@@ -42,6 +42,28 @@ def get_db_label(db_type):
     }
     return labels.get(db_type, 'Tuntematon')
 
+def is_penny_stock(df):
+    """
+    Tarkista onko osake penny stock (viimeisten 10 päivän keskiarvo alle $1.00).
+    
+    Args:
+        df (pandas.DataFrame): OHLCV data (Date, Close sarakkeet vaaditaan)
+    
+    Returns:
+        bool: True jos penny stock (alle $1.00), False muuten
+    """
+    if df.empty or 'Close' not in df.columns:
+        return True  # Jos dataa ei ole, hylkää varmuuden vuoksi
+    
+    # Ota viimeiset 10 päivää (tai kaikki jos alle 10)
+    last_10_days = df.tail(10)
+    
+    # Laske keskiarvo close-hinnoista
+    avg_close = last_10_days['Close'].mean()
+    
+    # Palauta True jos keskiarvo alle 1.00
+    return avg_close < 1.0
+
 def get_stock_data(search_terms, db_type='osakedata'):
     """
     Hae data tietokannasta. Tukee sekä tarkkaa hakua että osittaista hakua.
@@ -320,6 +342,11 @@ def fetch_yfinance_data(tickers):
                         failed_tickers.append(f"{ticker} (ei dataa)")
                         continue
                     
+                    # Tarkista penny stock -status ennen tallennusta
+                    if is_penny_stock(hist):
+                        failed_tickers.append(f"{ticker} (penny stock - alle $1.00 keskiarvo)")
+                        continue
+                    
                     # Käsittele data
                     hist.reset_index(inplace=True)
                     
@@ -463,49 +490,56 @@ def fetch_tickers_from_file(task_id=None):
                         if task_id and task_id in progress_store:
                             progress_store[task_id]['error_count'] += 1
                     else:
-                        # Käsittele data
-                        hist.reset_index(inplace=True)
-                        
-                        # Tallenna rivit tietokantaan
-                        ticker_saved = 0
-                        for _, row in hist.iterrows():
-                            # Ohita rivit joissa on NaN-arvoja
-                            if pd.isna([row['Open'], row['High'], row['Low'], row['Close'], row['Volume']]).any():
-                                continue
-                            
-                            date_str = row['Date'].strftime('%Y-%m-%d')
-                            
-                            # Tarkista onko päivämäärä jo olemassa
-                            cursor.execute(
-                                "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
-                                (ticker, date_str)
-                            )
-                            
-                            if cursor.fetchone()[0] == 0:  # Ei ole olemassa
-                                cursor.execute("""
-                                    INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    ticker,
-                                    date_str,
-                                    float(row['Open']),
-                                    float(row['High']),
-                                    float(row['Low']),
-                                    float(row['Close']),
-                                    int(row['Volume'])
-                                ))
-                                ticker_saved += 1
-                        
-                        if ticker_saved > 0:
-                            total_saved += ticker_saved
-                            # Update success count in progress
-                            if task_id and task_id in progress_store:
-                                progress_store[task_id]['success_count'] += 1
-                        else:
-                            failed_tickers.append(f"{ticker} (kaikki päivät jo olemassa)")
+                        # Tarkista penny stock -status ennen tallennusta
+                        if is_penny_stock(hist):
+                            failed_tickers.append(f"{ticker} (penny stock - alle $1.00 keskiarvo)")
                             # Update error count in progress
                             if task_id and task_id in progress_store:
                                 progress_store[task_id]['error_count'] += 1
+                        else:
+                            # Käsittele data
+                            hist.reset_index(inplace=True)
+                            
+                            # Tallenna rivit tietokantaan
+                            ticker_saved = 0
+                            for _, row in hist.iterrows():
+                                # Ohita rivit joissa on NaN-arvoja
+                                if pd.isna([row['Open'], row['High'], row['Low'], row['Close'], row['Volume']]).any():
+                                    continue
+                                
+                                date_str = row['Date'].strftime('%Y-%m-%d')
+                                
+                                # Tarkista onko päivämäärä jo olemassa
+                                cursor.execute(
+                                    "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
+                                    (ticker, date_str)
+                                )
+                                
+                                if cursor.fetchone()[0] == 0:  # Ei ole olemassa
+                                    cursor.execute("""
+                                        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        ticker,
+                                        date_str,
+                                        float(row['Open']),
+                                        float(row['High']),
+                                        float(row['Low']),
+                                        float(row['Close']),
+                                        int(row['Volume'])
+                                    ))
+                                    ticker_saved += 1
+                            
+                            if ticker_saved > 0:
+                                total_saved += ticker_saved
+                                # Update success count in progress
+                                if task_id and task_id in progress_store:
+                                    progress_store[task_id]['success_count'] += 1
+                            else:
+                                failed_tickers.append(f"{ticker} (kaikki päivät jo olemassa)")
+                                # Update error count in progress
+                                if task_id and task_id in progress_store:
+                                    progress_store[task_id]['error_count'] += 1
                             
                 except Exception as e:
                     failed_tickers.append(f"{ticker} (virhe: {str(e)})")
@@ -600,6 +634,7 @@ def fetch_csv_data(tickers=None):
     saved_count = 0
     failed_tickers = []
     found_tickers = set()
+    ticker_data = {}  # Tallenna ticker-kohtainen data penny stock -tarkistusta varten
     
     db_path = get_db_path('osakedata')
     
@@ -654,6 +689,10 @@ def fetch_csv_data(tickers=None):
                     
                     found_tickers.add(ticker)
                     
+                    # Kerää ticker-kohtainen data penny stock -tarkistusta varten
+                    if ticker not in ticker_data:
+                        ticker_data[ticker] = []
+                    
                     # Loput kentät ovat 6-kenttien ryhmiä: date, open, high, low, close, volume
                     for i in range(1, len(fields), 6):
                         if i + 5 >= len(fields):  # Ei tarpeeksi kenttiä tälle ryhmälle
@@ -674,29 +713,55 @@ def fetch_csv_data(tickers=None):
                             except ValueError:
                                 continue  # Ohita virheelliset päivämäärät
                             
-                            # Tarkista onko päivämäärä jo olemassa
-                            cursor.execute(
-                                "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
-                                (ticker, formatted_date)
-                            )
-                            
-                            if cursor.fetchone()[0] == 0:  # Ei ole olemassa
-                                cursor.execute("""
-                                    INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    ticker,
-                                    formatted_date,
-                                    open_price,
-                                    high_price,
-                                    low_price,
-                                    close_price,
-                                    volume
-                                ))
-                                saved_count += 1
+                            # Tallenna muistiin
+                            ticker_data[ticker].append({
+                                'Date': date_obj,
+                                'Open': open_price,
+                                'High': high_price,
+                                'Low': low_price,
+                                'Close': close_price,
+                                'Volume': volume,
+                                'date_str': formatted_date
+                            })
                                 
                         except (ValueError, IndexError) as e:
                             continue  # Ohita virheelliset rivit
+            
+            # Nyt tarkista penny stock -status ja tallenna kelvollinen data
+            for ticker, data_list in ticker_data.items():
+                if not data_list:
+                    continue
+                
+                # Muunna DataFrame-muotoon penny stock -tarkistusta varten
+                df = pd.DataFrame(data_list)
+                
+                # Tarkista penny stock -status
+                if is_penny_stock(df):
+                    failed_tickers.append(f"{ticker} (penny stock - alle $1.00 keskiarvo)")
+                    continue
+                
+                # Tallenna kelvollinen data tietokantaan
+                for row_data in data_list:
+                    # Tarkista onko päivämäärä jo olemassa
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM osakedata WHERE osake = ? AND pvm = ?",
+                        (ticker, row_data['date_str'])
+                    )
+                    
+                    if cursor.fetchone()[0] == 0:  # Ei ole olemassa
+                        cursor.execute("""
+                            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            ticker,
+                            row_data['date_str'],
+                            row_data['Open'],
+                            row_data['High'],
+                            row_data['Low'],
+                            row_data['Close'],
+                            row_data['Volume']
+                        ))
+                        saved_count += 1
             
             conn.commit()
             
