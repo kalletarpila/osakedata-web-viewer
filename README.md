@@ -20,9 +20,10 @@ Flask web application for viewing stock data from multiple SQLite databases.
   - **YFinance Integration**: Fetch real-time data from Yahoo Finance API
 - **Ticker File Processing**: Batch process tickers from external file with:
   - **Automated Processing**: Process all tickers from `tickers.txt` file
-  - **Rate Limiting**: 1-second delays + 10-second pauses every 100 stocks
-  - **Progress Tracking**: Real-time progress bar with detailed statistics
+  - **Dynamic Rate Limiting**: Intelligent delay scaling (100-300ms) based on batch size
+  - **Real-time Progress**: Server-Sent Events (SSE) for live progress updates
   - **Error Handling**: Comprehensive error reporting and recovery
+  - **Performance Optimized**: 70-90% faster processing for large batches
 
 ## Databases
 
@@ -94,8 +95,12 @@ The application starts at: `http://localhost:5000`
 
 #### Ticker File Processing
 - **Batch Import**: Automatically process all tickers from `/home/kalle/projects/rawcandle/data/tickers.txt`
-- **Rate Limiting**: 1-second delays between tickers + 10-second pauses every 100 stocks
-- **Progress Tracking**: Real-time progress bar showing processing status
+- **Dynamic Rate Limiting**: Intelligent delay scaling based on batch size:
+  - **≤100 tickers**: 300ms delays (API-friendly)
+  - **101-2000 tickers**: Linear scaling from 300ms to 100ms
+  - **>2000 tickers**: 100ms delays (maximum performance)
+- **Performance**: 70-90% faster than fixed delays for large batches
+- **Real-time Progress**: Server-Sent Events (SSE) for live progress updates
 - **Comprehensive Statistics**: Displays processed/success/error counts
 - **Background Processing**: Non-blocking UI with visual feedback
 - **Error Recovery**: Continues processing even if individual tickers fail
@@ -142,7 +147,12 @@ Sovellus hakee dataa tietokannasta: `/home/kalle/projects/rawcandle/data/osakeda
 
 **Ticker File Processing:**
 - **📋 Hae Tickerit -nappi**: Prosessoi automaattisesti kaikki `/home/kalle/projects/rawcandle/data/tickers.txt` tiedoston tickerit
-- **Progressi**: Reaaliaikainen edistymispalkki prosessoinnin seuranta
+- **Dynaaminen Optimointi**: Älykkäät viiveet riippuen ticker-määrästä:
+  - **Pienet erät** (≤100): 300ms viiveet (API-ystävällinen)
+  - **Keskikokoiset** (101-2000): Lineaarinen skaalaus 300ms → 100ms
+  - **Suuret erät** (>2000): 100ms viiveet (maksimi suorituskyky)
+- **Suorituskyky**: 70-90% nopeampi kuin kiinteät viiveet suurissa erissä
+- **Reaaliaikainen Seuranta**: Server-Sent Events (SSE) live-päivityksille
 - **Tilastot**: Näyttää käsitellyt/onnistuneet/epäonnistuneet määrät
 - **Virheensietokyky**: Jatkaa prosessointia vaikka yksittäiset tickerit epäonnistuisivat
 
@@ -174,6 +184,51 @@ Sovellus lukee `osakedata`-taulua, jossa on seuraavat sarakkeet:
 
 **Huom:** Sovellus näyttää kaikki tietokantarivit, myös mahdolliset duplikaatit. Tämä auttaa tietojen laadun tarkkailussa ja virheiden havaitsemisessa.
 
+## Suorituskyky ja Optimointi
+
+### Ticker File Processing Suorituskyky
+
+Dynaaminen viiveastrategia optimoi prosessointiaikaa ticker-määrän mukaan:
+
+| Ticker-määrä | Viive per ticker | Arvioitu kokonaisaika | Parannus vs. kiinteä 1s |
+|---------------|------------------|----------------------|-------------------------|
+| 100           | 300ms           | ~30 sekuntia         | 70% nopeampi            |
+| 500           | 260ms           | ~2.2 minuuttia       | 74% nopeampi            |
+| 1000          | 200ms           | ~3.3 minuuttia       | 80% nopeampi            |
+| 2000          | 100ms           | ~3.3 minuuttia       | 90% nopeampi            |
+| 5000          | 100ms           | ~8.3 minuuttia       | 90% nopeampi            |
+
+**Edut:**
+- **Pienet erät**: API-ystävällinen 300ms viive välttää rate limiting
+- **Suuret erät**: Aggressiivinen 100ms viive maksimoi suorituskyvyn
+- **Automaattinen skaalaus**: Ei manuaalista konfiguraatiota
+- **Real-time feedback**: Server-Sent Events näyttää live-progressin
+
+## Testikattavuus
+
+Projekti sisältää kattavan testisarjan eri toiminnallisuuksille:
+
+### Test Suites
+- **`test_fetch_tickers.py`**: 24 testiä ticker-prosessoinnille
+  - Dynaaminen viiveastrategia
+  - Rate limiting ja API-virheet
+  - Tiedoston käsittely ja validointi
+  - Web-reittien testaus
+- **Muut testisuitteet**: Database, Flask routes, error handling
+
+### Testien Ajaminen
+
+```bash
+# Kaikki testit
+.venv/bin/python -m pytest tests/ -v
+
+# Vain ticker-testit
+.venv/bin/python -m pytest tests/test_fetch_tickers.py -v
+
+# Testit kattavuusraportin kanssa
+.venv/bin/python -m pytest tests/ --cov=main --cov-report=html
+```
+
 ## API-päätepisteet
 
 - `GET /` - Pääsivu
@@ -182,6 +237,7 @@ Sovellus lukee `osakedata`-taulua, jossa on seuraavat sarakkeet:
 - `POST /fetch_csv` - CSV-datan tuonti (yksittäiset symbolit tai massa-ajo)
 - `POST /fetch_yfinance` - YFinance-datan tuonti reaaliaikaisesta API:sta
 - `POST /fetch_tickers` - Ticker-tiedoston käsittely (JSON API)
+- `GET /progress/<task_id>` - Server-Sent Events (SSE) progressin seuranta
 
 ## Kehitys
 

@@ -4,14 +4,22 @@ Stock Data Web Viewer
 A Flask web application for viewing stock data from SQLite database.
 """
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response, session
 import sqlite3
 import pandas as pd
 import os
 import yfinance as yf
 from datetime import datetime
+import time
+import uuid
+import threading
+import json
 
 app = Flask(__name__)
+app.secret_key = 'your-secret-key-here'  # Change this in production
+
+# Global progress tracking
+progress_store = {}
 
 # Tietokantojen sijainnit
 DB_PATHS = {
@@ -373,12 +381,15 @@ def fetch_yfinance_data(tickers):
         return False, f"Tietokantavirhe: {str(e)}", 0
 
 
-def fetch_tickers_from_file():
+def fetch_tickers_from_file(task_id=None):
     """
     Hae tickers.txt tiedostosta kaikki tickerit ja lataa niiden YFinance data.
     Tiedosto: /home/kalle/projects/rawcandle/data/tickers.txt
     Hakujakso: 1.7.2023 - 30.9.2025
     Palauttaa (success, message, saved_count)
+    
+    Args:
+        task_id (str, optional): Task ID for progress tracking
     """
     import time
     import os
@@ -398,8 +409,6 @@ def fetch_tickers_from_file():
     
     if not all_tickers:
         return False, "Tickers-tiedosto on tyhjä", {'processed': 0, 'success_count': 0, 'error_count': 0, 'total_saved': 0}
-    
-    print(f"📁 Luettu {len(all_tickers)} tickeriä tiedostosta")
     
     total_saved = 0
     failed_tickers = []
@@ -434,7 +443,13 @@ def fetch_tickers_from_file():
             
             for i, ticker in enumerate(all_tickers, 1):
                 processed_count = i
-                print(f"🔄 Haetaan {ticker} ({i}/{len(all_tickers)})")
+                
+                # Update progress if task_id is provided
+                if task_id and task_id in progress_store:
+                    progress_store[task_id].update({
+                        'processed': processed_count,
+                        'current_ticker': ticker
+                    })
                 
                 try:
                     # Hae data YFinancesta
@@ -444,7 +459,9 @@ def fetch_tickers_from_file():
                     # Tarkista että dataa löytyi
                     if hist.empty:
                         failed_tickers.append(f"{ticker} (ei dataa)")
-                        print(f"   ❌ {ticker}: Ei dataa")
+                        # Update error count in progress
+                        if task_id and task_id in progress_store:
+                            progress_store[task_id]['error_count'] += 1
                     else:
                         # Käsittele data
                         hist.reset_index(inplace=True)
@@ -481,23 +498,46 @@ def fetch_tickers_from_file():
                         
                         if ticker_saved > 0:
                             total_saved += ticker_saved
-                            print(f"   ✅ {ticker}: {ticker_saved} riviä tallennettu")
+                            # Update success count in progress
+                            if task_id and task_id in progress_store:
+                                progress_store[task_id]['success_count'] += 1
                         else:
                             failed_tickers.append(f"{ticker} (kaikki päivät jo olemassa)")
-                            print(f"   ⚠️ {ticker}: Kaikki päivät jo olemassa")
+                            # Update error count in progress
+                            if task_id and task_id in progress_store:
+                                progress_store[task_id]['error_count'] += 1
                             
                 except Exception as e:
                     failed_tickers.append(f"{ticker} (virhe: {str(e)})")
-                    print(f"   ❌ {ticker}: Virhe - {str(e)}")
+                    # Update error count in progress
+                    if task_id and task_id in progress_store:
+                        progress_store[task_id]['error_count'] += 1
                 
-                # 1 sekunnin tauko jokaisen osakkeen jälkeen
+                # Dynaaminen delay-strategia tikkerimäärän mukaan
+                # Optimoi tehokkuus vs. API-kuormitus:
+                # - Pienet haut (≤100): 300ms = turvallinen ja nopea
+                # - Keskikokoiset (≤500): 200ms = hyvä balanssi  
+                # - Suuret (≤2000): 150ms = tehokas massakäyttöön
+                # - Massiiviset (>2000): 100ms = maksimitehokkuus
                 if i < len(all_tickers):  # Ei taukoa viimeisen jälkeen
-                    time.sleep(1)
+                    total_tickers = len(all_tickers)
+                    
+                    # Perusdelay skaalautuu tikkerimäärän mukaan
+                    if total_tickers <= 100:
+                        base_delay = 0.3    # 300ms pienille hauille (< 30s kokonaisaika)
+                    elif total_tickers <= 500:
+                        base_delay = 0.2    # 200ms keskikokoisille (< 1.7min)
+                    elif total_tickers <= 2000:
+                        base_delay = 0.15   # 150ms suurille (< 5min)
+                    else:
+                        base_delay = 0.1    # 100ms massiivisille hauille (> 2000)
+                    
+                    time.sleep(base_delay)
                 
-                # 10 sekunnin tauko joka 100. osakkeen jälkeen
-                if i % 100 == 0 and i < len(all_tickers):
-                    print(f"⏸️ 10s tauko ({i}/100 osaketta haettu)")
-                    time.sleep(10)
+                # Pidempi tauko joka 200. osakkeen jälkeen (vähemmän häirintää)
+                if i % 200 == 0 and i < len(all_tickers):
+                    # Antaa Yahoo API:lle hengähdystaukoa
+                    time.sleep(5)  # Lyhennetty 10s -> 5s
                 
                 # Commitoi muutokset säännöllisesti
                 if i % 10 == 0:
@@ -528,7 +568,6 @@ def fetch_tickers_from_file():
             
     except Exception as e:
         error_msg = f"Tietokantavirhe tickeritiedoston käsittelyssä: {str(e)}"
-        print(f"❌ {error_msg}")
         stats = {
             'processed': processed_count,
             'success_count': 0,
@@ -700,6 +739,27 @@ def fetch_csv_data(tickers=None):
                     
     except Exception as e:
         return False, f"Virhe CSV-lukemisessa: {str(e)}", 0
+
+
+@app.route('/progress/<task_id>')
+def progress(task_id):
+    """Server-Sent Events endpoint for progress updates."""
+    def generate():
+        while True:
+            if task_id in progress_store:
+                progress_data = progress_store[task_id]
+                yield f"data: {json.dumps(progress_data)}\n\n"
+                
+                # If task is complete, remove from store and close connection
+                if progress_data.get('completed', False):
+                    del progress_store[task_id]
+                    break
+            else:
+                # Task not found, close connection
+                break
+            time.sleep(0.5)  # Update every 500ms
+    
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @app.route('/')
@@ -887,22 +947,44 @@ def fetch_tickers_route():
             'message': "Tickers-tiedosto on tyhjä"
         })
     
-    # Hae data tiedostosta
-    success, message, stats = fetch_tickers_from_file()
+    # Create unique task ID for progress tracking
+    task_id = str(uuid.uuid4())
     
-    if success:
-        return jsonify({
-            'success': True,
+    # Initialize progress
+    progress_store[task_id] = {
+        'processed': 0,
+        'total': ticker_count,
+        'success_count': 0,
+        'error_count': 0,
+        'current_ticker': '',
+        'completed': False,
+        'success': False,
+        'message': ''
+    }
+    
+    # Start processing in background thread
+    def background_task():
+        success, message, stats = fetch_tickers_from_file(task_id)
+        
+        # Update final progress
+        progress_store[task_id].update({
+            'completed': True,
+            'success': success,
             'message': message,
             'processed': stats.get('processed', 0),
             'success_count': stats.get('success_count', 0),
             'error_count': stats.get('error_count', 0)
         })
-    else:
-        return jsonify({
-            'success': False,
-            'message': message
-        })
+    
+    thread = threading.Thread(target=background_task)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+        'message': 'Prosessi aloitettu'
+    })
 
 
 @app.route('/fetch_csv', methods=['POST'])

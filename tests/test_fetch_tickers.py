@@ -3,11 +3,11 @@ Unit and integration tests for Fetch Tickers functionality in main.py
 
 Tests cover:
 - fetch_tickers_from_file() function with various scenarios
-- /fetch_tickers Flask route JSON API
+- /fetch_tickers Flask route JSON API (async with Server-Sent Events)
 - File handling and validation
 - Error handling for missing files and invalid data
 - Rate limiting and progress tracking
-- Statistics reporting (processed/success/error counts)
+- Async task initiation and task_id generation
 - Ticker file processing with time delays
 """
 
@@ -371,7 +371,7 @@ class TestFetchTickersFromFile:
     @pytest.mark.slow
     @pytest.mark.integration
     def test_fetch_tickers_from_file_rate_limiting_delays(self, monkeypatch, empty_osakedata_db):
-        """Test that rate limiting delays are applied correctly."""
+        """Test that dynamic rate limiting delays are applied correctly."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': empty_osakedata_db})
         
         ticker_content = "DELAY1\nDELAY2\nDELAY3\n"
@@ -390,9 +390,56 @@ class TestFetchTickersFromFile:
                     with patch('time.sleep', side_effect=mock_sleep):
                         success, message, stats = fetch_tickers_from_file()
                         
-                        # Should have 2 sleep calls (1 second each, after first 2 tickers)
+                        # Should have 2 sleep calls (300ms each for small batch ≤100 tickers)
                         assert len(sleep_calls) == 2
-                        assert all(delay == 1 for delay in sleep_calls)
+                        assert all(delay == 0.3 for delay in sleep_calls), f"Expected 0.3s delays, got: {sleep_calls}"
+
+    @pytest.mark.unit  
+    @pytest.mark.yfinance
+    def test_fetch_tickers_from_file_dynamic_delay_scaling(self, monkeypatch, empty_osakedata_db):
+        """Test that delay scaling works correctly for different ticker counts."""
+        monkeypatch.setattr('main.DB_PATHS', {'osakedata': empty_osakedata_db})
+        
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame()  # Empty to speed up test
+        
+        # Test different ticker counts and expected delays
+        test_cases = [
+            (50, 0.3),    # Small batch: 300ms
+            (300, 0.2),   # Medium batch: 200ms  
+            (1000, 0.15), # Large batch: 150ms
+            (5000, 0.1),  # Massive batch: 100ms
+        ]
+        
+        for ticker_count, expected_delay in test_cases:
+            sleep_calls = []
+            
+            def mock_sleep(seconds):
+                sleep_calls.append(seconds)
+            
+            # Create ticker content with specified count
+            ticker_content = '\n'.join([f"TEST{i}" for i in range(ticker_count)])
+            
+            with patch('os.path.exists', return_value=True):
+                with patch('builtins.open', mock_open(read_data=ticker_content)):
+                    with patch('main.yf.Ticker', return_value=mock_ticker):
+                        with patch('time.sleep', side_effect=mock_sleep):
+                            success, message, stats = fetch_tickers_from_file()
+                            
+                            # Should have (ticker_count - 1) base delays + pause delays
+                            expected_base_delays = ticker_count - 1  # No delay after last ticker
+                            expected_pause_delays = (ticker_count - 1) // 200  # Pause delays, but not after last ticker
+                            expected_total_delays = expected_base_delays + expected_pause_delays
+                            
+                            assert len(sleep_calls) == expected_total_delays, f"Ticker count {ticker_count}: expected {expected_total_delays} delays, got {len(sleep_calls)}"
+                            
+                            # Check base delays (filter out the 5s pause delays)
+                            base_delays = [delay for delay in sleep_calls if delay != 5]
+                            pause_delays = [delay for delay in sleep_calls if delay == 5]
+                            
+                            assert len(base_delays) == expected_base_delays, f"Expected {expected_base_delays} base delays, got {len(base_delays)}"
+                            assert len(pause_delays) == expected_pause_delays, f"Expected {expected_pause_delays} pause delays, got {len(pause_delays)}"
+                            assert all(delay == expected_delay for delay in base_delays), f"Expected {expected_delay}s base delays, got: {base_delays}"
 
 
 class TestFetchTickersRoute:
@@ -446,7 +493,7 @@ class TestFetchTickersRoute:
     @pytest.mark.integration
     @pytest.mark.web
     def test_fetch_tickers_route_success_single_ticker(self, isolated_db, monkeypatch):
-        """Test successful ticker processing via route."""
+        """Test successful ticker processing initiation via route (async API)."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db, 'analysis': isolated_db})
         
         # Ensure table exists
@@ -492,15 +539,14 @@ class TestFetchTickersRoute:
                             assert response.status_code == 200
                             data = json.loads(response.get_data(as_text=True))
                             assert data['success'] is True
-                            assert "Käsitelty 1/1 tickeriä" in data['message']
-                            assert data['processed'] == 1
-                            assert data['success_count'] == 1
-                            assert data['error_count'] == 0
+                            assert "Prosessi aloitettu" in data['message']
+                            assert 'task_id' in data
+                            assert isinstance(data['task_id'], str)
 
     @pytest.mark.integration
     @pytest.mark.web
     def test_fetch_tickers_route_mixed_results(self, isolated_db, monkeypatch):
-        """Test route with mixed successful and failed tickers."""
+        """Test route initiation with mixed successful and failed tickers (async API)."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db, 'analysis': isolated_db})
         
         # Ensure table exists
@@ -552,9 +598,9 @@ class TestFetchTickersRoute:
                             assert response.status_code == 200
                             data = json.loads(response.get_data(as_text=True))
                             assert data['success'] is True
-                            assert data['processed'] == 3
-                            assert data['success_count'] == 2
-                            assert data['error_count'] == 1
+                            assert "Prosessi aloitettu" in data['message']
+                            assert 'task_id' in data
+                            assert isinstance(data['task_id'], str)
 
     @pytest.mark.integration
     @pytest.mark.web
@@ -588,7 +634,7 @@ class TestFetchTickersRoute:
     @pytest.mark.integration
     @pytest.mark.web
     def test_fetch_tickers_route_success_statistics(self, isolated_db, monkeypatch):
-        """Test that route returns correct statistics on success."""
+        """Test that route returns correct async API response format."""
         monkeypatch.setattr('main.DB_PATHS', {'osakedata': isolated_db, 'analysis': isolated_db})
         
         # Ensure table exists
@@ -633,12 +679,12 @@ class TestFetchTickersRoute:
                             assert response.status_code == 200
                             data = json.loads(response.get_data(as_text=True))
                             
-                            # Verify all statistics fields are present and correct
+                            # Verify new async API response format
                             assert data['success'] is True
-                            assert data['processed'] == 1
-                            assert data['success_count'] == 1
-                            assert data['error_count'] == 0
+                            assert 'task_id' in data
+                            assert isinstance(data['task_id'], str)
                             assert 'message' in data
+                            assert "Prosessi aloitettu" in data['message']
 
     @pytest.mark.integration
     @pytest.mark.web

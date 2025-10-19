@@ -382,9 +382,11 @@
             
             // Reset progress
             progressBar.style.width = '0%';
+            progressBar.classList.remove('bg-success', 'bg-danger');
+            progressBar.classList.add('progress-bar-animated');
             progressText.textContent = 'Aloitetaan ticker-tiedoston käsittely...';
             
-            // Start the actual fetch
+            // Start the task
             fetch('/fetch_tickers', {
                 method: 'POST',
                 headers: {
@@ -393,20 +395,66 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    progressBar.style.width = '100%';
-                    progressBar.classList.remove('progress-bar-animated');
-                    progressBar.classList.add('bg-success');
-                    progressText.textContent = `Valmis! Käsitelty ${data.processed} tickeriä, ${data.success_count} onnistui, ${data.error_count} epäonnistui.`;
+                if (data.success && data.task_id) {
+                    // Start listening for progress updates
+                    const eventSource = new EventSource(`/progress/${data.task_id}`);
                     
-                    // Hide progress after 5 seconds
-                    setTimeout(() => {
-                        progressContainer.style.display = 'none';
-                    }, 5000);
+                    eventSource.onmessage = function(event) {
+                        const progress = JSON.parse(event.data);
+                        
+                        // Update progress bar
+                        const percentage = progress.total > 0 ? (progress.processed / progress.total * 100) : 0;
+                        progressBar.style.width = `${percentage}%`;
+                        
+                        // Update progress text
+                        if (progress.current_ticker) {
+                            progressText.textContent = `Käsitellään ${progress.current_ticker} (${progress.processed}/${progress.total}) - Onnistui: ${progress.success_count}, Epäonnistui: ${progress.error_count}`;
+                        }
+                        
+                        // Check if completed
+                        if (progress.completed) {
+                            eventSource.close();
+                            
+                            if (progress.success) {
+                                progressBar.style.width = '100%';
+                                progressBar.classList.remove('progress-bar-animated');
+                                progressBar.classList.add('bg-success');
+                                progressText.textContent = `Valmis! Käsitelty ${progress.processed} tickeriä, ${progress.success_count} onnistui, ${progress.error_count} epäonnistui.`;
+                                
+                                // Hide progress after 5 seconds
+                                setTimeout(() => {
+                                    progressContainer.style.display = 'none';
+                                }, 5000);
+                            } else {
+                                progressBar.classList.remove('progress-bar-animated');
+                                progressBar.classList.add('bg-danger');
+                                progressText.textContent = `Virhe: ${progress.message}`;
+                            }
+                            
+                            // Re-enable button
+                            button.disabled = false;
+                            button.innerHTML = '📋 Hae Tickerit';
+                        }
+                    };
+                    
+                    eventSource.onerror = function(event) {
+                        eventSource.close();
+                        progressBar.classList.remove('progress-bar-animated');
+                        progressBar.classList.add('bg-danger');
+                        progressText.textContent = 'Virhe edistymisen seurannassa';
+                        
+                        // Re-enable button
+                        button.disabled = false;
+                        button.innerHTML = '📋 Hae Tickerit';
+                    };
                 } else {
                     progressBar.classList.remove('progress-bar-animated');
                     progressBar.classList.add('bg-danger');
                     progressText.textContent = `Virhe: ${data.message}`;
+                    
+                    // Re-enable button
+                    button.disabled = false;
+                    button.innerHTML = '📋 Hae Tickerit';
                 }
             })
             .catch(error => {
@@ -414,8 +462,7 @@
                 progressBar.classList.add('bg-danger');
                 progressText.textContent = 'Virhe verkkoyhteydessä';
                 console.error('Error:', error);
-            })
-            .finally(() => {
+                
                 // Re-enable button
                 button.disabled = false;
                 button.innerHTML = '📋 Hae Tickerit';
