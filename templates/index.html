@@ -179,7 +179,12 @@
                             <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
-                                        <h6 class="card-title">Ticker-tiedoston käsittely</h6>
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h6 class="card-title mb-0">Ticker-tiedoston käsittely</h6>
+                                            <button id="close-progress-btn" class="btn btn-sm btn-outline-secondary" onclick="closeProgressBar()" style="display: none;">
+                                                ❌ Sulje
+                                            </button>
+                                        </div>
                                         <div class="progress mb-2">
                                             <div id="ticker-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
                                                  role="progressbar" style="width: 0%"></div>
@@ -434,25 +439,23 @@
                         if (progress.completed) {
                             eventSource.close();
                             
+                            // Show close button when completed
+                            document.getElementById('close-progress-btn').style.display = 'block';
+                            
                             if (progress.success) {
                                 progressBar.style.width = '100%';
                                 progressBar.classList.remove('progress-bar-animated');
                                 progressBar.classList.add('bg-success');
                                 progressText.textContent = `Valmis! Käsitelty ${progress.processed} tickeriä - Onnistui: ${progress.success_count}, Epäonnistui: ${progress.error_count}, Hylätty (penny): ${progress.penny_stock_count || 0}`;
-                                
-                                // Hide progress after 5 seconds
-                                setTimeout(() => {
-                                    progressContainer.style.display = 'none';
-                                }, 5000);
                             } else {
                                 progressBar.classList.remove('progress-bar-animated');
                                 progressBar.classList.add('bg-danger');
                                 progressText.textContent = `Virhe: ${progress.message}`;
+                                
+                                // Re-enable button only on error
+                                button.disabled = false;
+                                button.innerHTML = '📋 Hae Tickerit';
                             }
-                            
-                            // Re-enable button
-                            button.disabled = false;
-                            button.innerHTML = '📋 Hae Tickerit';
                         }
                     };
                     
@@ -462,18 +465,16 @@
                         progressBar.classList.add('bg-danger');
                         progressText.textContent = 'Virhe edistymisen seurannassa';
                         
-                        // Re-enable button
-                        button.disabled = false;
-                        button.innerHTML = '📋 Hae Tickerit';
+                        // Show close button even on error
+                        document.getElementById('close-progress-btn').style.display = 'block';
                     };
                 } else {
                     progressBar.classList.remove('progress-bar-animated');
                     progressBar.classList.add('bg-danger');
                     progressText.textContent = `Virhe: ${data.message}`;
                     
-                    // Re-enable button
-                    button.disabled = false;
-                    button.innerHTML = '📋 Hae Tickerit';
+                    // Show close button even on initial error
+                    document.getElementById('close-progress-btn').style.display = 'block';
                 }
             })
             .catch(error => {
@@ -482,11 +483,27 @@
                 progressText.textContent = 'Virhe verkkoyhteydessä';
                 console.error('Error:', error);
                 
-                // Re-enable button
-                button.disabled = false;
-                button.innerHTML = '📋 Hae Tickerit';
+                // Show close button even on network error
+                document.getElementById('close-progress-btn').style.display = 'block';
             });
         });
+
+        // Function to close progress bar manually
+        function closeProgressBar() {
+            const progressContainer = document.getElementById('ticker-progress-container');
+            const closeBtn = document.getElementById('close-progress-btn');
+            
+            // Hide progress container
+            progressContainer.style.display = 'none';
+            
+            // Hide close button for next time
+            closeBtn.style.display = 'none';
+            
+            // Re-enable the fetch button
+            const fetchBtn = document.getElementById('fetch-tickers-btn');
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = '📋 Hae Tickerit';
+        }
 
                 // Päivitä saatavilla olevat symbolit kun tietokantaa vaihdetaan
         function updateDatabase() {
