@@ -493,9 +493,9 @@ def fetch_tickers_from_file(task_id=None):
                         # Tarkista penny stock -status ennen tallennusta
                         if is_penny_stock(hist):
                             failed_tickers.append(f"{ticker} (penny stock - alle $1.00 keskiarvo)")
-                            # Update error count in progress
+                            # Update penny stock count in progress
                             if task_id and task_id in progress_store:
-                                progress_store[task_id]['error_count'] += 1
+                                progress_store[task_id]['penny_stock_count'] += 1
                         else:
                             # Käsittele data
                             hist.reset_index(inplace=True)
@@ -1009,6 +1009,7 @@ def fetch_tickers_route():
         'total': ticker_count,
         'success_count': 0,
         'error_count': 0,
+        'penny_stock_count': 0,
         'current_ticker': '',
         'completed': False,
         'success': False,

@@ -427,7 +427,7 @@
                         
                         // Update progress text
                         if (progress.current_ticker) {
-                            progressText.textContent = `Käsitellään ${progress.current_ticker} (${progress.processed}/${progress.total}) - Onnistui: ${progress.success_count}, Epäonnistui: ${progress.error_count}`;
+                            progressText.textContent = `Käsitellään ${progress.current_ticker} (${progress.processed}/${progress.total}) - Onnistui: ${progress.success_count}, Epäonnistui: ${progress.error_count}, Hylätty (penny): ${progress.penny_stock_count || 0}`;
                         }
                         
                         // Check if completed
@@ -438,7 +438,7 @@
                                 progressBar.style.width = '100%';
                                 progressBar.classList.remove('progress-bar-animated');
                                 progressBar.classList.add('bg-success');
-                                progressText.textContent = `Valmis! Käsitelty ${progress.processed} tickeriä, ${progress.success_count} onnistui, ${progress.error_count} epäonnistui.`;
+                                progressText.textContent = `Valmis! Käsitelty ${progress.processed} tickeriä - Onnistui: ${progress.success_count}, Epäonnistui: ${progress.error_count}, Hylätty (penny): ${progress.penny_stock_count || 0}`;
                                 
                                 // Hide progress after 5 seconds
                                 setTimeout(() => {
