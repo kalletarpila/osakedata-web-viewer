@@ -518,10 +518,14 @@ def fetch_tickers_from_file(task_id=None):
                 if i < len(all_tickers):  # Ei taukoa viimeisen jälkeen
                     time.sleep(0.6)  # 600ms kiinteä viive
                 
-                # Pidempi tauko joka 200. osakkeen jälkeen (vähemmän häirintää)
-                if i % 200 == 0 and i < len(all_tickers):
-                    # Antaa Yahoo API:lle hengähdystaukoa
-                    time.sleep(5)  # Lyhennetty 10s -> 5s
+                # Pitkä tauko joka 500. osakkeen jälkeen (API:n hyvinvointi)
+                if i % 500 == 0 and i > 0 and i < len(all_tickers):
+                    # 1 minuutin tauko antaa Yahoo API:lle merkittävän hengähdyshetken
+                    time.sleep(60)  # 60 sekunnin tauko
+                # Lyhyempi tauko joka 200. osakkeen jälkeen (ei jos on jo 500:n jakaja)
+                elif i % 200 == 0 and i > 0 and i < len(all_tickers):
+                    # Kevyempi hengähdystauko
+                    time.sleep(5)  # 5 sekunnin tauko
                 
                 # Commitoi muutokset säännöllisesti
                 if i % 10 == 0:

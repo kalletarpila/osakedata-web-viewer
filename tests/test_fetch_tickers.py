@@ -421,25 +421,40 @@ class TestFetchTickersFromFile:
                         with patch('time.sleep', side_effect=mock_sleep):
                             success, message, stats = fetch_tickers_from_file()
                             
-                            # Should have (ticker_count - 1) base delays + pause delays
+                            # Calculate expected delays with new pause logic:
+                            # - Every 500th ticker (i % 500 == 0 and i > 0): 60s pause
+                            # - Every 200th ticker (i % 200 == 0 and i > 0), but not 500th: 5s pause
                             expected_base_delays = ticker_count - 1  # No delay after last ticker
-                            expected_pause_delays = (ticker_count - 1) // 200  # Pause delays, but not after last ticker
-                            expected_total_delays = expected_base_delays + expected_pause_delays
+                            
+                            # Count pause delays considering new logic
+                            long_pauses = 0  # 60s pauses at 500, 1000, 1500, etc.
+                            short_pauses = 0  # 5s pauses at 200, 400, 600, 800, etc. (but not 500, 1000, etc.)
+                            
+                            for i in range(1, ticker_count):  # Start from 1, no pause after last
+                                if i % 500 == 0:
+                                    long_pauses += 1
+                                elif i % 200 == 0:
+                                    short_pauses += 1
+                            
+                            expected_total_delays = expected_base_delays + long_pauses + short_pauses
                             
                             assert len(sleep_calls) == expected_total_delays, f"Ticker count {ticker_count}: expected {expected_total_delays} delays, got {len(sleep_calls)}"
                             
-                            # Check base delays (filter out the 5s pause delays)
-                            base_delays = [delay for delay in sleep_calls if delay != 5]
-                            pause_delays = [delay for delay in sleep_calls if delay == 5]
+                            # Separate different types of delays
+                            base_delays = [delay for delay in sleep_calls if delay == 0.6]
+                            long_pause_delays = [delay for delay in sleep_calls if delay == 60]
+                            short_pause_delays = [delay for delay in sleep_calls if delay == 5]
                             
                             assert len(base_delays) == expected_base_delays, f"Expected {expected_base_delays} base delays, got {len(base_delays)}"
+                            assert len(long_pause_delays) == long_pauses, f"Expected {long_pauses} long pauses (60s), got {len(long_pause_delays)}"
+                            assert len(short_pause_delays) == short_pauses, f"Expected {short_pauses} short pauses (5s), got {len(short_pause_delays)}"
                             
                             # All base delays should be 0.6 seconds (fixed delay)
                             assert all(delay == 0.6 for delay in base_delays), f"Expected 0.6s delays, got: {base_delays}"
                             
-                            # All pause delays should be 5 seconds
-                            assert all(delay == 5 for delay in pause_delays), f"Expected 5s pause delays, got: {pause_delays}"
-                            assert len(pause_delays) == expected_pause_delays, f"Expected {expected_pause_delays} pause delays, got {len(pause_delays)}"
+                            # Verify pause delay values
+                            assert all(delay == 60 for delay in long_pause_delays), f"Expected 60s long pauses, got: {long_pause_delays}"
+                            assert all(delay == 5 for delay in short_pause_delays), f"Expected 5s short pauses, got: {short_pause_delays}"
 
 
 class TestFetchTickersRoute:
